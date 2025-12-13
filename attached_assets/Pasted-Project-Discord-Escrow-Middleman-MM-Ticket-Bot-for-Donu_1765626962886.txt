@@ -1,0 +1,95 @@
+Project: Discord Escrow / Middleman (MM) Ticket Bot for Donut SMP — Spec
+
+Goal
+Build a secure, production-ready Discord bot that functions like a ticket bot for escrow trades tied to a Minecraft server. The bot should manage trades with verification via in-game payments, take a 5% fee on completed trades, and provide a ticket-based support workflow where users or the bot can open a support ticket (thread/channel) and tag a configurable support role if a trade is reported as a scam.
+
+High-level security constraints
+• Only accept Minecraft chat payment confirmations from a trusted server bridge (Spigot/Paper plugin webhook or authenticated RCON/log-tailer) protected by HMAC or a shared secret. Never trust raw Discord messages as proof.  
+• Parse currency amounts robustly (commas, decimals, suffixes `k/m/b` case-insensitive, e.g., `2.5k`, `50M`, `1,000`). Normalize to decimal. k=1e3, m=1e6, b=1e9 unless configured differently.  
+• Store logs/audit trail for every action: trade events, raw chat lines used as evidence, admin actions, timestamps, Discord & Minecraft IDs.
+
+Core workflows & UX
+
+1) Account linking (one-time)
+• `/mm link <minecraft_username>` — bot returns a 4–6 char code (ephemeral / DM).  
+• User verifies in-game via plugin (`/mmverify <code>`) or plugin sends verification webhook. On success map Discord ID ⇄ Minecraft username.
+
+2) Create trade (ticket-based)
+• `/mm create @discord_user <seller_mc> <buyer_mc> <amount>`  
+• Bot creates a *private trade ticket* (a temporary Discord thread or a private channel visible only to: seller Discord user, buyer Discord user, bot, and staff/support roles). The ticket ID is shown, and the bot posts the steps & expected verification amounts.  
+• Bot picks two random verification amounts between `$1.00` and `$50.23` (two decimals) — one per side — and stores them immutably.
+
+3) Verification payments (in-game)
+• Bot instructs both parties in the ticket: “Pay exactly $X in-game to `<other_mc>`; the server chat will show `Player paid you $Y` — the bot will auto-detect that line.” Timeout configurable (default 10 min).  
+• Minecraft plugin/webhook -> bot: send signed chat lines that match payment regexes. Example regex:
+  `(?i)^(?<recipient>\w+) paid you \$?(?<amount>[0-9\.,]+(?:[kKmMbB])?)`
+• Bot normalizes amounts and matches payer/recipient/amount to expected verification payments. On first match, bot posts in ticket: `Verification payment detected from <mcPayer> → <mcRecipient> $X (verified).`  
+• When both verification payments are received, bot marks trade `VERIFIED` and prompts the buyer (in ticket) to deposit the sale amount into escrow (either in-game to an escrow account/API or via confirmed mechanism).
+
+4) Holding escrow & completion
+• After buyer deposit detected (via plugin/webhook or API), bot marks `IN_ESCROW`.  
+• When buyer confirms in ticket (button: “Confirm deliver”), or after an agreed automatic verification step, bot calculates fee = 5% of sale amount, deducts fee, and releases remainder to seller via server API call or admin instruction.  
+• On success, bot posts final summary in configured public channel and mentions both Discord users:  
+  `✅ Trade #ID completed. Sale: $A | Fee (5%): $F | Seller received: $A-F — Parties: @Seller @Buyer — Minecraft: seller_mc ↔ buyer_mc`
+
+5) Ticket support & “Mark as Scammed”
+• Any participant can open a support ticket inside the trade thread with button/command `Report → Mark as scammed` or `/mm mark_scammed <trade_id> <reason>`.  
+• On mark_scammed:
+  - Bot pins the report in the trade ticket and sets trade `DISPUTE_OPEN`.  
+  - Bot **automatically tags the configured support role** (e.g., `@Support`) in the trade ticket and optionally posts to a dedicated staff channel with the evidence (raw chat lines, timestamps, links to logs).  
+  - Bot creates a new support ticket thread (or escalates the existing trade thread) that includes: trade ID, parties, raw evidence, and a quick action panel for staff (buttons: `Freeze funds`, `Request more evidence`, `Adjudicate → Give buyer | Give seller | Split`, `Close ticket`).  
+• Staff role(s) must have permissions to run admin commands: `/mm adjudicate`, `/mm freeze`, `/mm unfreeze`, `/mm cancel`, `/mm forfeit_fee`.
+
+6) Admin adjudication & audit
+• Admin command examples:
+  - `/mm adjudicate <trade_id> give seller|buyer <amount> [reason]` — releases funds accordingly.  
+  - `/mm freeze <trade_id>` — freeze funds and prevent auto-release.  
+  - `/mm close_ticket <trade_id> [notes]` — close ticket and log decision.  
+• All admin actions get appended to trade audit log with admin Discord ID and raw_data.
+
+7) Notifications & channel tagging
+• `/mm setchannel #channel` — final completion messages posted here.  
+• `/mm set-support-role @role` — role to tag when `mark_scammed` occurs.  
+• On scammed report, bot tags the support role and posts a summary in the configured staff channel (configurable).
+
+Edge cases & protections
+• If bot receives a matching in-game payment but from an unlinked Minecraft name, it posts in ticket: “Unlinked account payment received; link to proceed.” Don’t auto-credit.  
+• Prevent replay: verification amounts are unique per trade and change each trade. Match by exact normalized value.  
+• Do not accept un-signed webhooks. Validate HMAC header or token from plugin.  
+• Rate-limit `mark_scammed` actions and auto-lock a small window for quick abuse prevention. Logging every attempt.
+
+Data model (concise)
+• trades: id, seller_discord, buyer_discord, seller_mc, buyer_mc, sale_amount, fee_percent (5.0), fee_amount, status, verification_amount_buyer, verification_amount_seller, escrow_balance, created_at, updated_at.  
+• verifications: trade_id, payer_mc, recipient_mc, expected_amount, received_amount, raw_line, timestamp.  
+• tickets: trade_id, thread_id/channel_id, status, support_role_tagged, staff_thread_id.  
+• audit_logs: timestamp, trade_id, actor_id, action, raw_payload.
+
+Commands & Buttons (examples)
+• `/mm link <mc>` — link MC account  
+• `/mm create @user seller_mc buyer_mc <amount>` — start trade (creates ticket thread)  
+• `/mm status <trade_id>` — show trade & ticket status (in thread)  
+• `/mm deposit <trade_id>` — (if manual) mark deposit done after server confirms  
+• `/mm mark_scammed <trade_id> <reason>` — participant reports scam (tags support role, opens staff ticket)  
+• `/mm adjudicate <trade_id> give seller|buyer <amount> [reason]` — admin only  
+• Buttons inside thread: `Confirm Delivered`, `Mark as Scammed`, `Request Cancellation`, `Attach Evidence` (upload file)
+
+Implementation & stack suggestions
+• Node.js + discord.js v14 + express for webhook + PostgreSQL or SQLite. Or Python (discord.py + FastAPI).  
+• Small Spigot/Paper plugin: post chat lines to bot webhook with HMAC header signed using configured secret. Plugin must expose verification commands (`/mmverify <code>`) and support escrow API calls if server economy plugin supports it.  
+• Provide unit tests for amount parsing, suffix conversions, webhook auth, and ticket lifecycle.
+
+Testing & deliverables
+1. Developer README with install steps (Discord bot token, DB, webhook secret, plugin install).  
+2. Working bot code (trade lifecycle, ticket threads, scammed reporting, support role tagging).  
+3. Small Spigot/Paper plugin that sends signed chat lines and supports `/mmverify`.  
+4. Example config & test harness to simulate chat lines (so admins can test without a live server).  
+5. Basic automated tests for parsing and security checks.
+
+Priority summary
+1. Ticket-based UX (private thread per trade)  
+2. Secure in-game -> bot bridge (HMAC + regex parsing for `paid you $X`)  
+3. Immutable verification amounts, unique per trade  
+4. 5% fee accounting and secure release mechanics  
+5. “Mark as Scammed” flow that tags support role, opens staff ticket, and logs everything for human review
+
+End spec.
