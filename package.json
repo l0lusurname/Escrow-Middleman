@@ -1,0 +1,23 @@
+{
+  "name": "donut-smp-escrow-bot",
+  "version": "1.0.0",
+  "description": "Discord Escrow/Middleman Bot for Donut SMP Minecraft trades",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "dotenv": "^16.6.1",
+    "drizzle-orm": "^0.45.1",
+    "express": "^4.22.1",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.8"
+  }
+}
