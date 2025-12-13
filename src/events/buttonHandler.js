@@ -40,8 +40,12 @@ export async function handleButtonInteraction(interaction) {
     return handleConfirmDelivered(interaction);
   } else if (customId.startsWith("mark_scammed_")) {
     return handleMarkScammedButton(interaction);
+  } else if (customId.startsWith("cancel_confirm_seller_")) {
+    return handleCancelConfirm(interaction, "seller");
+  } else if (customId.startsWith("cancel_confirm_buyer_")) {
+    return handleCancelConfirm(interaction, "buyer");
   } else if (customId.startsWith("request_cancel_") || customId.startsWith("cancel_trade_db_")) {
-    return handleRequestCancel(interaction);
+    return handleShowCancelButtons(interaction);
   } else if (customId.startsWith("adj_seller_")) {
     return handleAdjudicateButton(interaction, "seller");
   } else if (customId.startsWith("adj_buyer_")) {
@@ -271,7 +275,7 @@ async function handleMarkScammedButton(interaction) {
   }
 }
 
-async function handleRequestCancel(interaction) {
+async function handleShowCancelButtons(interaction) {
   const tradeId = parseInt(interaction.customId.split("_").pop());
 
   try {
@@ -286,14 +290,163 @@ async function handleRequestCancel(interaction) {
       return interaction.reply({ content: "Only trade participants can cancel.", flags: MessageFlags.Ephemeral });
     }
 
-    await logAction(tradeId, userId, "CANCELLATION_REQUESTED", {});
+    if (trade.status === "COMPLETED" || trade.status === "CANCELLED") {
+      return interaction.reply({ content: `Trade already ${trade.status.toLowerCase()}.`, flags: MessageFlags.Ephemeral });
+    }
+
+    const cancelButtons = createCancelConfirmButtons(tradeId, trade.sellerCancelConfirm, trade.buyerCancelConfirm);
+
+    const embed = new EmbedBuilder()
+      .setTitle("Cancel Trade Confirmation")
+      .setColor(0xFFA500)
+      .setDescription("Both parties must confirm to cancel this trade.\nClick your button to confirm cancellation.")
+      .addFields(
+        { name: "Seller", value: trade.sellerCancelConfirm ? "✅ Confirmed" : "❌ Not confirmed", inline: true },
+        { name: "Buyer", value: trade.buyerCancelConfirm ? "✅ Confirmed" : "❌ Not confirmed", inline: true }
+      )
+      .setFooter({ text: `Trade #${tradeId}` })
+      .setTimestamp();
 
     await interaction.reply({
-      content: `<@${trade.sellerDiscordId}> <@${trade.buyerDiscordId}> - Cancellation requested by <@${userId}>. An admin can finalize with \`/mm close_ticket ${tradeId}\`.`,
+      embeds: [embed],
+      components: [cancelButtons],
     });
   } catch (error) {
-    console.error("Request cancel error:", error);
+    console.error("Show cancel buttons error:", error);
     await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+  }
+}
+
+function createCancelConfirmButtons(tradeId, sellerConfirmed, buyerConfirmed) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`cancel_confirm_seller_${tradeId}`)
+      .setLabel("Seller Confirm")
+      .setStyle(sellerConfirmed ? ButtonStyle.Success : ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId(`cancel_confirm_buyer_${tradeId}`)
+      .setLabel("Buyer Confirm")
+      .setStyle(buyerConfirmed ? ButtonStyle.Success : ButtonStyle.Danger)
+  );
+}
+
+async function handleCancelConfirm(interaction, party) {
+  const tradeId = parseInt(interaction.customId.split("_").pop());
+
+  try {
+    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    if (!trade) {
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+    }
+
+    const userId = interaction.user.id;
+    const isSeller = trade.sellerDiscordId === userId;
+    const isBuyer = trade.buyerDiscordId === userId;
+
+    if (!isSeller && !isBuyer) {
+      return interaction.reply({ content: "Only trade participants can cancel.", flags: MessageFlags.Ephemeral });
+    }
+
+    // Check if user is clicking the correct button
+    if (party === "seller" && !isSeller) {
+      return interaction.reply({ content: "Only the seller can click this button.", flags: MessageFlags.Ephemeral });
+    }
+    if (party === "buyer" && !isBuyer) {
+      return interaction.reply({ content: "Only the buyer can click this button.", flags: MessageFlags.Ephemeral });
+    }
+
+    if (trade.status === "COMPLETED" || trade.status === "CANCELLED") {
+      return interaction.reply({ content: `Trade already ${trade.status.toLowerCase()}.`, flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.deferUpdate();
+
+    // Update the confirmation
+    const updateData = {
+      updatedAt: new Date(),
+    };
+    if (party === "seller") {
+      updateData.sellerCancelConfirm = true;
+    } else {
+      updateData.buyerCancelConfirm = true;
+    }
+
+    await db.update(trades).set(updateData).where(eq(trades.id, tradeId));
+
+    // Refetch trade to check if both confirmed
+    const [updatedTrade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    if (updatedTrade.sellerCancelConfirm && updatedTrade.buyerCancelConfirm) {
+      // Both confirmed - cancel the trade
+      await db.update(trades).set({
+        status: "CANCELLED",
+        updatedAt: new Date(),
+      }).where(eq(trades.id, tradeId));
+
+      await db.update(tickets).set({
+        status: "CLOSED",
+        updatedAt: new Date(),
+      }).where(eq(tickets.tradeId, tradeId));
+
+      // Refund buyer if escrow has funds
+      const escrowBalance = parseFloat(updatedTrade.escrowBalance) || 0;
+      if (escrowBalance > 0 && minecraftBot.isConnected()) {
+        const payCommand = `/pay ${updatedTrade.buyerMc} ${escrowBalance.toFixed(2)}`;
+        minecraftBot.sendChat(payCommand);
+        console.log(`Refund on cancel: ${payCommand}`);
+      }
+
+      await logAction(tradeId, userId, "TRADE_CANCELLED", { cancelledBy: "mutual" });
+
+      const cancelledEmbed = new EmbedBuilder()
+        .setTitle("Trade Cancelled")
+        .setColor(0xFF0000)
+        .setDescription("Both parties agreed to cancel this trade.")
+        .addFields(
+          { name: "Seller", value: `<@${updatedTrade.sellerDiscordId}>`, inline: true },
+          { name: "Buyer", value: `<@${updatedTrade.buyerDiscordId}>`, inline: true }
+        )
+        .setFooter({ text: `Trade #${tradeId}` })
+        .setTimestamp();
+
+      if (escrowBalance > 0) {
+        cancelledEmbed.addFields({ name: "Refund", value: `${formatAmount(escrowBalance)} returned to buyer` });
+      }
+
+      await interaction.editReply({
+        embeds: [cancelledEmbed],
+        components: [],
+      });
+
+      await refreshPublicEmbed(interaction.client, interaction.guild.id);
+    } else {
+      // Update the buttons to show new state
+      const cancelButtons = createCancelConfirmButtons(tradeId, updatedTrade.sellerCancelConfirm, updatedTrade.buyerCancelConfirm);
+
+      const embed = new EmbedBuilder()
+        .setTitle("Cancel Trade Confirmation")
+        .setColor(0xFFA500)
+        .setDescription("Both parties must confirm to cancel this trade.\nClick your button to confirm cancellation.")
+        .addFields(
+          { name: "Seller", value: updatedTrade.sellerCancelConfirm ? "✅ Confirmed" : "❌ Not confirmed", inline: true },
+          { name: "Buyer", value: updatedTrade.buyerCancelConfirm ? "✅ Confirmed" : "❌ Not confirmed", inline: true }
+        )
+        .setFooter({ text: `Trade #${tradeId}` })
+        .setTimestamp();
+
+      await interaction.editReply({
+        embeds: [embed],
+        components: [cancelButtons],
+      });
+
+      await logAction(tradeId, userId, "CANCEL_CONFIRMED", { party });
+    }
+  } catch (error) {
+    console.error("Cancel confirm error:", error);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+    }
   }
 }
 

@@ -27,6 +27,8 @@ export const trades = pgTable("trades", {
   sellerVerified: boolean("seller_verified").default(false),
   escrowBalance: decimal("escrow_balance", { precision: 20, scale: 2 }).default("0.00"),
   frozen: boolean("frozen").default(false),
+  sellerCancelConfirm: boolean("seller_cancel_confirm").default(false),
+  buyerCancelConfirm: boolean("buyer_cancel_confirm").default(false),
   threadId: text("thread_id"),
   staffThreadId: text("staff_thread_id"),
   createdAt: timestamp("created_at").defaultNow(),
