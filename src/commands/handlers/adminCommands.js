@@ -2,12 +2,19 @@ import { EmbedBuilder, PermissionFlagsBits } from "discord.js";
 import { db } from "../../db/index.js";
 import { trades, tickets, botConfig } from "../../db/schema.js";
 import { eq } from "drizzle-orm";
-import { formatAmount } from "../../utils/currencyParser.js";
+import { formatAmount, parseAmount } from "../../utils/currencyParser.js";
 import { logAction } from "../../utils/auditLog.js";
 import { postOrUpdatePublicEmbed } from "../../ui/publicEmbed.js";
+import { minecraftBot } from "../../minecraft/mineflayer.js";
+
+const OWNER_ID = process.env.OWNER_DISCORD_ID;
 
 function checkAdmin(interaction) {
   return interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+}
+
+function checkOwner(interaction) {
+  return interaction.user.id === OWNER_ID || interaction.guild.ownerId === interaction.user.id;
 }
 
 export async function handleAdjudicate(interaction) {
@@ -337,5 +344,38 @@ export async function handlePostEmbed(interaction) {
   } catch (error) {
     console.error("Post embed error:", error);
     await interaction.editReply({ content: "An error occurred while posting the embed." });
+  }
+}
+
+export async function handlePay(interaction) {
+  if (!checkOwner(interaction)) {
+    return interaction.reply({ content: "Only the bot owner can use this command.", ephemeral: true });
+  }
+
+  const ign = interaction.options.getString("ign");
+  const amountStr = interaction.options.getString("amount");
+  const amount = parseAmount(amountStr);
+
+  if (!amount || amount <= 0) {
+    return interaction.reply({ content: "Invalid amount.", ephemeral: true });
+  }
+
+  try {
+    await interaction.deferReply({ ephemeral: true });
+
+    if (!minecraftBot.isConnected()) {
+      return interaction.editReply({ content: "Minecraft bot is not connected." });
+    }
+
+    const payCommand = `/pay ${ign} ${amount.toFixed(2)}`;
+    minecraftBot.sendChat(payCommand);
+    console.log(`Owner payment: ${payCommand}`);
+
+    await logAction(null, interaction.user.id, "OWNER_PAYMENT", { ign, amount });
+
+    await interaction.editReply({ content: `Sent payment command: \`${payCommand}\`` });
+  } catch (error) {
+    console.error("Pay command error:", error);
+    await interaction.editReply({ content: "An error occurred while sending the payment." });
   }
 }

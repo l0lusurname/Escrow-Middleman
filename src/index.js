@@ -15,6 +15,7 @@ import {
   handleDeposit,
   handleSetMmChannel,
   handlePostEmbed,
+  handlePay,
 } from "./commands/handlers/adminCommands.js";
 import { handleButtonInteraction } from "./events/buttonHandler.js";
 import { handleModalSubmit } from "./events/modalHandler.js";
@@ -144,6 +145,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const stats = await getDailyStats(interaction.guild.id);
             const statsEmbed = createAdminPanelEmbed(stats);
             await interaction.editReply({ embeds: [statsEmbed] });
+            break;
+          case "pay":
+            await handlePay(interaction);
             break;
           default:
             await interaction.reply({ content: "Unknown subcommand.", ephemeral: true });

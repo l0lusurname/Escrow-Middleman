@@ -141,6 +141,17 @@ export const data = new SlashCommandBuilder()
     sub
       .setName("stats")
       .setDescription("Admin: View daily profit and trade statistics")
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("pay")
+      .setDescription("Owner: Make the bot pay a player in Minecraft")
+      .addStringOption((opt) =>
+        opt.setName("ign").setDescription("Minecraft username to pay").setRequired(true)
+      )
+      .addStringOption((opt) =>
+        opt.setName("amount").setDescription("Amount to pay (supports k/m/b suffixes)").setRequired(true)
+      )
   );
 
 export async function execute(interaction) {
