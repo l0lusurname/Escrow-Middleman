@@ -4,9 +4,11 @@ import * as schema from "./schema.js";
 
 const { Pool } = pg;
 
-if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL must be set. Did you forget to provision a database?");
+const databaseUrl = process.env.SUPABASE_DATABASE_URL || process.env.DATABASE_URL;
+
+if (!databaseUrl) {
+  throw new Error("SUPABASE_DATABASE_URL or DATABASE_URL must be set.");
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = new Pool({ connectionString: databaseUrl });
 export const db = drizzle(pool, { schema });
