@@ -176,11 +176,17 @@ async function start() {
       console.log(`Webhook server running on port ${PORT}`);
     });
 
+    console.log("Attempting to login to Discord...");
     await client.login(DISCORD_TOKEN);
+    console.log("Discord login completed.");
   } catch (error) {
     console.error("Failed to start:", error);
     process.exit(1);
   }
 }
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
 
 start();
