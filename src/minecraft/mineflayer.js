@@ -69,9 +69,32 @@ class MinecraftBot extends EventEmitter {
       this.emit("spawned");
     });
 
-    this.bot.on("message", (jsonMsg) => {
+    this.bot.on("message", (jsonMsg, position) => {
       const message = jsonMsg.toString();
+      console.log(`[MC Msg pos=${position}] ${message}`);
       this.handleChatMessage(message);
+    });
+
+    this.bot.on("messagestr", (message, position, jsonMsg) => {
+      console.log(`[MC MsgStr pos=${position}] ${message}`);
+      this.handleChatMessage(message);
+    });
+
+    this.bot._client.on("system_chat", (packet) => {
+      if (packet.content) {
+        try {
+          const parsed = JSON.parse(packet.content);
+          const text = this.extractText(parsed);
+          console.log(`[MC SysChat] ${text}`);
+          this.handleChatMessage(text);
+        } catch (e) {
+          console.log(`[MC SysChat Raw] ${packet.content}`);
+        }
+      }
+    });
+
+    this.bot._client.on("player_chat", (packet) => {
+      console.log(`[MC PlayerChat] ${JSON.stringify(packet)}`);
     });
 
     this.bot.on("kicked", (reason) => {
@@ -92,6 +115,22 @@ class MinecraftBot extends EventEmitter {
       console.error("Minecraft bot error:", err);
       this.emit("error", err);
     });
+  }
+
+  extractText(component) {
+    if (typeof component === 'string') return component;
+    let text = component.text || '';
+    if (component.extra) {
+      for (const extra of component.extra) {
+        text += this.extractText(extra);
+      }
+    }
+    if (component.with) {
+      for (const w of component.with) {
+        text += this.extractText(w);
+      }
+    }
+    return text;
   }
 
   normalizeMessage(message) {
