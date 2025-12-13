@@ -125,16 +125,17 @@ async function handleTradeSetupModal(interaction) {
       console.error("Could not add other party to channel:", e);
     }
 
-    await deleteLastBotMessage(channel);
-
     const embed = createVerificationEmbed(newTrade, false, false);
     const buttons = createVerificationButtons(newTrade.id);
 
-    await interaction.editReply({
+    const replyMessage = await interaction.editReply({
       content: `Trade #${newTrade.id} created!\n\n<@${sellerDiscordId}>, pay \`${formatAmount(verificationAmountSeller)}\` to verify.\n<@${buyerDiscordId}>, pay \`${formatAmount(verificationAmountBuyer)}\` to verify.`,
       embeds: [embed],
       components: [buttons],
     });
+
+    // Delete old bot messages AFTER our reply is sent, excluding our new message
+    await deleteLastBotMessage(channel, replyMessage.id);
 
     if (notes) {
       await channel.send({ content: `**Notes:** ${notes}` });
