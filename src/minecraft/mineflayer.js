@@ -2,11 +2,11 @@ import mineflayer from "mineflayer";
 import { EventEmitter } from "events";
 import { parseAmount } from "../utils/currencyParser.js";
 
-const MINECRAFT_HOST = process.env.MINECRAFT_HOST || "donut.smp.net";
+const MINECRAFT_HOST = process.env.MINECRAFT_HOST || "donutsmp.net";
 const MINECRAFT_PORT = parseInt(process.env.MINECRAFT_PORT) || 25565;
 const MINECRAFT_VERSION = process.env.MINECRAFT_VERSION || "1.21.1";
 const MINECRAFT_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
-const MINECRAFT_AUTH = process.env.MINECRAFT_AUTH || "offline";
+const MINECRAFT_AUTH = process.env.MINECRAFT_AUTH || "microsoft";
 
 class MinecraftBot extends EventEmitter {
   constructor() {
@@ -22,15 +22,33 @@ class MinecraftBot extends EventEmitter {
     console.log(`Connecting to Minecraft server ${MINECRAFT_HOST}:${MINECRAFT_PORT} as ${MINECRAFT_USERNAME}...`);
 
     try {
-      this.bot = mineflayer.createBot({
+      const botOptions = {
         host: MINECRAFT_HOST,
         port: MINECRAFT_PORT,
         username: MINECRAFT_USERNAME,
         version: MINECRAFT_VERSION,
         auth: MINECRAFT_AUTH,
         hideErrors: false,
-      });
+      };
 
+      // Add auth callback for Microsoft authentication
+      if (MINECRAFT_AUTH === "microsoft") {
+        botOptions.onMsaCode = (data) => {
+          console.log("\n========== MICROSOFT AUTHENTICATION ==========");
+          console.log(`Open this URL in your browser: ${data.verification_uri}`);
+          console.log(`Enter this code: ${data.user_code}`);
+          console.log(`Code expires in: ${Math.floor(data.expires_in / 60)} minutes`);
+          console.log("==============================================\n");
+
+          this.emit("authCode", {
+            url: data.verification_uri,
+            code: data.user_code,
+            expiresIn: data.expires_in
+          });
+        };
+      }
+
+      this.bot = mineflayer.createBot(botOptions);
       this.setupEventListeners();
     } catch (error) {
       console.error("Failed to create Minecraft bot:", error);

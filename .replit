@@ -33,3 +33,8 @@ outputType = "console"
 [[ports]]
 localPort = 3000
 externalPort = 3000
+
+[userenv]
+
+[userenv.shared]
+ENABLE_MINEFLAYER = "true"
