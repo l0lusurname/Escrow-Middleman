@@ -151,10 +151,15 @@ async function handleTradeSetupModal(interaction) {
     await refreshPublicEmbed(interaction.client, interaction.guild.id);
   } catch (error) {
     console.error("Trade setup modal error:", error);
-    if (interaction.deferred) {
-      await interaction.editReply({ content: "An error occurred." });
-    } else {
-      await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content: "An error occurred while setting up the trade." }).catch(() => {});
+      } else {
+        await interaction.reply({ content: "An error occurred while setting up the trade.", flags: MessageFlags.Ephemeral }).catch(() => {});
+      }
+    } catch (replyError) {
+      // Interaction expired, nothing we can do
+      console.error("Could not send error response:", replyError);
     }
   }
 }
@@ -255,10 +260,14 @@ async function handleScamModal(interaction) {
     await refreshPublicEmbed(interaction.client, guild.id);
   } catch (error) {
     console.error("Scam modal error:", error);
-    if (interaction.deferred) {
-      await interaction.editReply({ content: "An error occurred." });
-    } else {
-      await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content: "An error occurred while opening the dispute." }).catch(() => {});
+      } else {
+        await interaction.reply({ content: "An error occurred while opening the dispute.", flags: MessageFlags.Ephemeral }).catch(() => {});
+      }
+    } catch (replyError) {
+      console.error("Could not send error response:", replyError);
     }
   }
 }
