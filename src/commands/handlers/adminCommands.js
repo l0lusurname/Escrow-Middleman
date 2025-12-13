@@ -20,14 +20,16 @@ export async function handleAdjudicate(interaction) {
   const reason = interaction.options.getString("reason") || "No reason provided";
 
   try {
+    await interaction.deferReply();
+
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: `Trade #${tradeId} not found.`, ephemeral: true });
+      return interaction.editReply({ content: `Trade #${tradeId} not found.` });
     }
 
     if (trade.status === "COMPLETED" || trade.status === "CANCELLED") {
-      return interaction.reply({ content: `Trade is already ${trade.status.toLowerCase()}.`, ephemeral: true });
+      return interaction.editReply({ content: `Trade is already ${trade.status.toLowerCase()}.` });
     }
 
     const escrowBalance = parseFloat(trade.escrowBalance || 0);
@@ -72,7 +74,7 @@ export async function handleAdjudicate(interaction) {
       )
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
 
     const guild = interaction.guild;
     const [config] = await db.select().from(botConfig).where(eq(botConfig.guildId, guild.id)).limit(1);
@@ -92,7 +94,11 @@ export async function handleAdjudicate(interaction) {
     }
   } catch (error) {
     console.error("Adjudicate error:", error);
-    await interaction.reply({ content: "An error occurred during adjudication.", ephemeral: true });
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply({ content: "An error occurred during adjudication." });
+    } else {
+      await interaction.reply({ content: "An error occurred during adjudication.", ephemeral: true });
+    }
   }
 }
 
@@ -104,19 +110,21 @@ export async function handleFreeze(interaction) {
   const tradeId = interaction.options.getInteger("trade_id");
 
   try {
+    await interaction.deferReply({ ephemeral: true });
+
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: `Trade #${tradeId} not found.`, ephemeral: true });
+      return interaction.editReply({ content: `Trade #${tradeId} not found.` });
     }
 
     await db.update(trades).set({ frozen: true, updatedAt: new Date() }).where(eq(trades.id, tradeId));
     await logAction(tradeId, interaction.user.id, "FROZEN", {});
 
-    await interaction.reply({ content: `Trade #${tradeId} has been frozen. Funds cannot be released until unfrozen.` });
+    await interaction.editReply({ content: `Trade #${tradeId} has been frozen. Funds cannot be released until unfrozen.` });
   } catch (error) {
     console.error("Freeze error:", error);
-    await interaction.reply({ content: "An error occurred while freezing the trade.", ephemeral: true });
+    await interaction.editReply({ content: "An error occurred while freezing the trade." });
   }
 }
 
@@ -128,19 +136,21 @@ export async function handleUnfreeze(interaction) {
   const tradeId = interaction.options.getInteger("trade_id");
 
   try {
+    await interaction.deferReply({ ephemeral: true });
+
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: `Trade #${tradeId} not found.`, ephemeral: true });
+      return interaction.editReply({ content: `Trade #${tradeId} not found.` });
     }
 
     await db.update(trades).set({ frozen: false, updatedAt: new Date() }).where(eq(trades.id, tradeId));
     await logAction(tradeId, interaction.user.id, "UNFROZEN", {});
 
-    await interaction.reply({ content: `Trade #${tradeId} has been unfrozen.` });
+    await interaction.editReply({ content: `Trade #${tradeId} has been unfrozen.` });
   } catch (error) {
     console.error("Unfreeze error:", error);
-    await interaction.reply({ content: "An error occurred while unfreezing the trade.", ephemeral: true });
+    await interaction.editReply({ content: "An error occurred while unfreezing the trade." });
   }
 }
 
@@ -153,10 +163,12 @@ export async function handleCloseTicket(interaction) {
   const notes = interaction.options.getString("notes") || "Closed by admin";
 
   try {
+    await interaction.deferReply({ ephemeral: true });
+
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: `Trade #${tradeId} not found.`, ephemeral: true });
+      return interaction.editReply({ content: `Trade #${tradeId} not found.` });
     }
 
     await db.update(tickets).set({
@@ -166,10 +178,10 @@ export async function handleCloseTicket(interaction) {
 
     await logAction(tradeId, interaction.user.id, "TICKET_CLOSED", { notes });
 
-    await interaction.reply({ content: `Ticket for Trade #${tradeId} has been closed. Notes: ${notes}` });
+    await interaction.editReply({ content: `Ticket for Trade #${tradeId} has been closed. Notes: ${notes}` });
   } catch (error) {
     console.error("Close ticket error:", error);
-    await interaction.reply({ content: "An error occurred while closing the ticket.", ephemeral: true });
+    await interaction.editReply({ content: "An error occurred while closing the ticket." });
   }
 }
 
@@ -182,6 +194,8 @@ export async function handleSetChannel(interaction) {
   const guildId = interaction.guild.id;
 
   try {
+    await interaction.deferReply({ ephemeral: true });
+
     const [existing] = await db.select().from(botConfig).where(eq(botConfig.guildId, guildId)).limit(1);
 
     if (existing) {
@@ -196,10 +210,10 @@ export async function handleSetChannel(interaction) {
       });
     }
 
-    await interaction.reply({ content: `Completion announcements will now be posted in ${channel}.` });
+    await interaction.editReply({ content: `Completion announcements will now be posted in ${channel}.` });
   } catch (error) {
     console.error("Set channel error:", error);
-    await interaction.reply({ content: "An error occurred while setting the channel.", ephemeral: true });
+    await interaction.editReply({ content: "An error occurred while setting the channel." });
   }
 }
 
@@ -212,6 +226,8 @@ export async function handleSetSupportRole(interaction) {
   const guildId = interaction.guild.id;
 
   try {
+    await interaction.deferReply({ ephemeral: true });
+
     const [existing] = await db.select().from(botConfig).where(eq(botConfig.guildId, guildId)).limit(1);
 
     if (existing) {
@@ -226,10 +242,10 @@ export async function handleSetSupportRole(interaction) {
       });
     }
 
-    await interaction.reply({ content: `Support role set to ${role}. This role will be tagged on scam reports.` });
+    await interaction.editReply({ content: `Support role set to ${role}. This role will be tagged on scam reports.` });
   } catch (error) {
     console.error("Set support role error:", error);
-    await interaction.reply({ content: "An error occurred while setting the support role.", ephemeral: true });
+    await interaction.editReply({ content: "An error occurred while setting the support role." });
   }
 }
 
@@ -237,19 +253,21 @@ export async function handleDeposit(interaction) {
   const tradeId = interaction.options.getInteger("trade_id");
 
   try {
+    await interaction.deferReply({ ephemeral: true });
+
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: `Trade #${tradeId} not found.`, ephemeral: true });
+      return interaction.editReply({ content: `Trade #${tradeId} not found.` });
     }
 
     const userId = interaction.user.id;
     if (trade.buyerDiscordId !== userId && !checkAdmin(interaction)) {
-      return interaction.reply({ content: "Only the buyer or an admin can mark a deposit.", ephemeral: true });
+      return interaction.editReply({ content: "Only the buyer or an admin can mark a deposit." });
     }
 
     if (trade.status !== "VERIFIED") {
-      return interaction.reply({ content: "Trade must be verified before deposit can be made.", ephemeral: true });
+      return interaction.editReply({ content: "Trade must be verified before deposit can be made." });
     }
 
     await db.update(trades).set({
@@ -260,10 +278,10 @@ export async function handleDeposit(interaction) {
 
     await logAction(tradeId, userId, "DEPOSIT_MARKED", { amount: trade.saleAmount });
 
-    await interaction.reply({ content: `Deposit of ${formatAmount(trade.saleAmount)} marked for Trade #${tradeId}. Trade is now IN_ESCROW.` });
+    await interaction.editReply({ content: `Deposit of ${formatAmount(trade.saleAmount)} marked for Trade #${tradeId}. Trade is now IN_ESCROW.` });
   } catch (error) {
     console.error("Deposit error:", error);
-    await interaction.reply({ content: "An error occurred while marking the deposit.", ephemeral: true });
+    await interaction.editReply({ content: "An error occurred while marking the deposit." });
   }
 }
 
@@ -276,6 +294,8 @@ export async function handleSetMmChannel(interaction) {
   const guildId = interaction.guild.id;
 
   try {
+    await interaction.deferReply({ ephemeral: true });
+
     const [existing] = await db.select().from(botConfig).where(eq(botConfig.guildId, guildId)).limit(1);
 
     if (existing) {
@@ -290,10 +310,10 @@ export async function handleSetMmChannel(interaction) {
       });
     }
 
-    await interaction.reply({ content: `Public middleman channel set to ${channel}. Use \`/mm post_embed\` to post the Start Middleman button.` });
+    await interaction.editReply({ content: `Public middleman channel set to ${channel}. Use \`/mm post_embed\` to post the Start Middleman button.` });
   } catch (error) {
     console.error("Set MM channel error:", error);
-    await interaction.reply({ content: "An error occurred while setting the channel.", ephemeral: true });
+    await interaction.editReply({ content: "An error occurred while setting the channel." });
   }
 }
 

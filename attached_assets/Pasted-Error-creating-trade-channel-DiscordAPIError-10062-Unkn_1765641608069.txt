@@ -1,0 +1,31 @@
+Error creating trade channel: DiscordAPIError[10062]: Unknown interaction
+    at handleErrors (/home/runner/workspace/node_modules/@discordjs/rest/dist/index.js:762:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async BurstHandler.runRequest (/home/runner/workspace/node_modules/@discordjs/rest/dist/index.js:866:23)
+    at async _REST.request (/home/runner/workspace/node_modules/@discordjs/rest/dist/index.js:1307:22)
+    at async ButtonInteraction.deferReply (/home/runner/workspace/node_modules/discord.js/src/structures/interfaces/InteractionResponses.js:122:22)
+    at async createTradeChannel (file:///home/runner/workspace/src/ui/tradeChannel.js:45:5)
+    at async handleStartMiddleman (file:///home/runner/workspace/src/events/buttonHandler.js:57:5)
+    at async Client.<anonymous> (file:///home/runner/workspace/src/index.js:153:7) {
+  requestBody: { files: undefined, json: { type: 5, data: [Object] } },
+  rawError: { message: 'Unknown interaction', code: 10062 },
+  code: 10062,
+  status: 404,
+  method: 'POST',
+  url: 'https://discord.com/api/v10/interactions/1449430163975835710/aW50ZXJhY3Rpb246MTQ0OTQzMDE2Mzk3NTgzNTcxMDpxc3FyeUFnTFM0WUxGU1NuOERRbW1WdUllbzJVVmowNGhBOXFWQVZkdHBQYVhGMGZWT2NuNk16ajl5aXRDem1COEFyTklMS2RMVmZtTnJ2NTRWZjdNaG5MSkFzUlNBZ3RTVmhkVFE3Q1VKQ3FSbkVqQWh6MUdOb3ZvSmZLOTdtUw/callback?with_response=false'
+}
+Set MM channel error: DiscordAPIError[10062]: Unknown interaction
+    at handleErrors (/home/runner/workspace/node_modules/@discordjs/rest/dist/index.js:762:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async BurstHandler.runRequest (/home/runner/workspace/node_modules/@discordjs/rest/dist/index.js:866:23)
+    at async _REST.request (/home/runner/workspace/node_modules/@discordjs/rest/dist/index.js:1307:22)
+    at async ChatInputCommandInteraction.reply (/home/runner/workspace/node_modules/discord.js/src/structures/interfaces/InteractionResponses.js:193:22)
+    at async handleSetMmChannel (file:///home/runner/workspace/src/commands/handlers/adminCommands.js:293:5)
+    at async Client.<anonymous> (file:///home/runner/workspace/src/index.js:133:13) {
+  requestBody: { files: [], json: { type: 4, data: [Object] } },
+  rawError: { message: 'Unknown interaction', code: 10062 },
+  code: 10062,
+  status: 404,
+  method: 'POST',
+  url: 'https://discord.com/api/v10/interactions/1449430009977765941/aW50ZXJhY3Rpb246MTQ0OTQzMDAwOTk3Nzc2NTk0MTp0ZkFES0NxVEdZRlNzUXBMQnZpSGkzV2d6NUk4em1LWkFPeW50MkpCVlFCY1dKRVltT2d0NnBTRzF0WDVjMHE1Z2FUTktJRWsyQXBOQ2dTSndqaUJYclVSVGV1NUgyQUxwczlzVmdLVkRlZ2FZRU5xRnZSZnVSUHltVW0xTzJiUQ/callback?with_response=false'
+}

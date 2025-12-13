@@ -93,10 +93,12 @@ async function handleCopyPay(interaction, party) {
   const tradeId = parseInt(interaction.customId.split("_").pop());
 
   try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: "Trade not found." });
     }
 
     const amount = party === "seller"
@@ -105,13 +107,12 @@ async function handleCopyPay(interaction, party) {
 
     const payCommand = `/pay ${BOT_MC_USERNAME} ${amount.toFixed(2)}`;
 
-    await interaction.reply({ 
-      content: `Copy this command:\n\`\`\`${payCommand}\`\`\``, 
-      flags: MessageFlags.Ephemeral 
+    await interaction.editReply({ 
+      content: `Copy this command:\n\`\`\`${payCommand}\`\`\`` 
     });
   } catch (error) {
     console.error("Copy pay error:", error);
-    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+    await interaction.editReply({ content: "An error occurred." });
   }
 }
 
@@ -119,30 +120,31 @@ async function handleDepositEscrow(interaction) {
   const tradeId = parseInt(interaction.customId.split("_").pop());
 
   try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: "Trade not found." });
     }
 
     if (trade.buyerDiscordId !== interaction.user.id) {
-      return interaction.reply({ content: "Only the buyer can deposit to escrow.", flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: "Only the buyer can deposit to escrow." });
     }
 
     if (!trade.buyerVerified || !trade.sellerVerified) {
-      return interaction.reply({ content: "Both parties must be verified first.", flags: MessageFlags.Ephemeral });
+      return interaction.editReply({ content: "Both parties must be verified first." });
     }
 
     const saleAmount = parseFloat(trade.saleAmount);
     const payCommand = `/pay ${BOT_MC_USERNAME} ${saleAmount.toFixed(2)}`;
 
-    await interaction.reply({ 
-      content: `Deposit to escrow:\n\`\`\`${payCommand}\`\`\`\nThe bot will detect your payment automatically.`, 
-      flags: MessageFlags.Ephemeral 
+    await interaction.editReply({ 
+      content: `Deposit to escrow:\n\`\`\`${payCommand}\`\`\`\nThe bot will detect your payment automatically.` 
     });
   } catch (error) {
     console.error("Deposit escrow error:", error);
-    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+    await interaction.editReply({ content: "An error occurred." });
   }
 }
 

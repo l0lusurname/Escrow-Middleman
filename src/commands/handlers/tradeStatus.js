@@ -8,12 +8,13 @@ export async function handleStatus(interaction) {
   const tradeId = interaction.options.getInteger("trade_id");
 
   try {
+    await interaction.deferReply({ ephemeral: true });
+
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({
+      return interaction.editReply({
         content: `Trade #${tradeId} not found.`,
-        ephemeral: true,
       });
     }
 
@@ -22,9 +23,8 @@ export async function handleStatus(interaction) {
     const isAdmin = interaction.member.permissions.has("Administrator");
 
     if (!isParticipant && !isAdmin) {
-      return interaction.reply({
+      return interaction.editReply({
         content: "You don't have permission to view this trade.",
-        ephemeral: true,
       });
     }
 
@@ -63,12 +63,11 @@ export async function handleStatus(interaction) {
       embed.addFields({ name: "Verifications", value: verificationInfo || "None" });
     }
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     console.error("Status error:", error);
-    await interaction.reply({
+    await interaction.editReply({
       content: "An error occurred while fetching trade status.",
-      ephemeral: true,
     });
   }
 }
