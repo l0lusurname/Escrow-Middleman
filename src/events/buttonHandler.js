@@ -17,6 +17,7 @@ import {
   deleteLastBotMessage
 } from "../ui/tradeChannel.js";
 import { refreshPublicEmbed } from "../ui/publicEmbed.js";
+import { minecraftBot } from "../minecraft/mineflayer.js";
 
 const BOT_MC_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
 
@@ -188,6 +189,15 @@ async function handleConfirmDelivered(interaction) {
       updatedAt: new Date(),
     }).where(eq(tickets.tradeId, tradeId));
 
+    // Send payment to seller in Minecraft
+    if (minecraftBot.isConnected()) {
+      const payCommand = `/pay ${trade.sellerMc} ${sellerReceives.toFixed(2)}`;
+      minecraftBot.sendChat(payCommand);
+      console.log(`Sent Minecraft payment: ${payCommand}`);
+    } else {
+      console.error("Minecraft bot not connected - could not send payment");
+    }
+
     await logAction(tradeId, interaction.user.id, "DELIVERY_CONFIRMED", { feeAmount, sellerReceives });
 
     try {
@@ -333,6 +343,15 @@ async function handleAdjudicateButton(interaction, decision) {
       status: "CLOSED",
       updatedAt: new Date(),
     }).where(eq(tickets.tradeId, tradeId));
+
+    // Send payment to recipient in Minecraft
+    if (minecraftBot.isConnected()) {
+      const payCommand = `/pay ${recipientMc} ${amountReleased.toFixed(2)}`;
+      minecraftBot.sendChat(payCommand);
+      console.log(`Sent Minecraft payment: ${payCommand}`);
+    } else {
+      console.error("Minecraft bot not connected - could not send payment");
+    }
 
     await logAction(tradeId, interaction.user.id, "ADJUDICATED", { decision, amountReleased });
 
