@@ -1,0 +1,124 @@
+Project: Discord MM / Escrow Ticket Bot (Mineflayer Payment Verification)
+
+Goal
+Build a Discord ticket-style middleman (MM) bot for a Minecraft server (Donut SMP) that verifies users by in-game payments made directly to the bot’s Minecraft account. No verification codes. No command-heavy UX. GUI-first Discord flow using buttons, modals, select menus, and private threads. Admins are any Discord users with Administrator permission.
+
+Core Concepts
+- The bot logs into the Minecraft server using Mineflayer (configurable host, default donut.smp.net, version default 1.21.1).
+- Verification is done by requiring each party to send a small, random in-game payment directly to the bot’s Minecraft account.
+- The bot detects payments via a secure server-side plugin/webhook or authenticated log stream.
+- Each trade is a private ticket (thread or channel).
+- The bot takes a 5% fee on completed trades.
+- Disputes are handled by tagging a support role and escalating to staff.
+
+Stack
+- Node.js
+- discord.js v14+
+- mineflayer
+- express (webhook receiver)
+- SQLite or PostgreSQL
+- Spigot/Paper plugin for secure chat/payment forwarding (HMAC-signed)
+
+Configuration
+- BOT_TOKEN
+- WEBHOOK_SECRET
+- MINECRAFT_HOST (default donut.smp.net)
+- MINECRAFT_VERSION (default 1.21.1)
+- MINECRAFT_ACCOUNT credentials (Mineflayer)
+- SUPPORT_ROLE_ID
+- PUBLIC_LOG_CHANNEL_ID
+- DATABASE_URL
+
+Permissions
+- Any Discord user with Administrator permission is treated as admin.
+- Support role is only for dispute pings and staff escalation.
+
+Ticket-based GUI Flow
+
+1. Trade creation
+- User clicks “Open MM Ticket” button.
+- Bot creates a private thread/channel visible to:
+  buyer, seller, bot, Administrators.
+- Bot presents a modal:
+  - Select buyer (Discord user)
+  - Select seller (Discord user)
+  - Sale amount
+- Bot stores trade and generates two random verification amounts:
+  - Range: $1.00 – $50.23
+  - Two decimals
+  - One amount per party
+
+2. Payment-based verification (NO CODES)
+- Bot posts instructions in the ticket:
+  “To verify, each party must pay the bot’s Minecraft account the exact amount shown below.”
+- Example:
+  Seller must pay: $12.37
+  Buyer must pay: $4.91
+- Payments must be sent in-game directly to the bot’s Minecraft username.
+- Bot waits for server-confirmed payment messages.
+
+3. Payment detection
+- Spigot/Paper plugin forwards payment chat lines to bot webhook:
+  `{ action: "payment", payer_mc, recipient_mc, amount, raw_line }`
+- Bot validates HMAC signature.
+- Amount parsing must support:
+  - commas
+  - decimals
+  - k / m / b suffixes (case-insensitive)
+- Normalize values:
+  k = 1e3, m = 1e6, b = 1e9
+- Verification payment matches when:
+  - payer_mc matches expected user
+  - recipient_mc == bot’s MC username
+  - amount == exact expected verification amount
+- When detected, bot updates ticket UI.
+- When both parties are verified, trade moves to VERIFIED state.
+
+4. Escrow deposit
+- Bot instructs buyer (GUI button):
+  “Deposit sale amount to bot escrow”
+- Buyer sends sale amount in-game to bot.
+- Plugin confirms escrow deposit via webhook.
+- Bot marks trade IN_ESCROW.
+
+5. Completion & fee
+- Buyer clicks “Confirm Delivery” button.
+- Bot calculates fee = 5%.
+- Seller payout = sale_amount − fee.
+- Bot releases funds to seller via plugin or admin-confirmed transfer.
+- Trade marked COMPLETED.
+- Bot posts summary in PUBLIC_LOG_CHANNEL_ID tagging both Discord users.
+
+Public message example:
+“Deal completed: $1,000.00 | Fee: $50.00 (5%)
+Parties: @Buyer @Seller”
+
+6. Mark as Scammed (Support escalation)
+- Either party can click “Mark as Scammed” in the ticket.
+- Bot:
+  - Pins the report
+  - Freezes escrow
+  - Sets trade to DISPUTE_OPEN
+  - Tags SUPPORT_ROLE_ID in the ticket
+  - Opens or escalates to a staff-only thread with full evidence
+- Staff/admin GUI buttons:
+  - Freeze / Unfreeze
+  - Request Evidence
+  - Adjudicate → Give Buyer | Give Seller | Split
+- All actions logged.
+
+Data Model (minimal)
+- users: discord_id, mc_username, verified
+- trades: id, buyer_discord, seller_discord, buyer_mc, seller_mc, sale_amount, fee_amount, status, thread_id
+- payments: trade_id, payer_mc, amount, raw_line, timestamp
+- audit_logs: trade_id, actor, action, timestamp, raw_payload
+
+Rules
+- No verification codes.
+- Verification ONLY via payment to the bot.
+- No unilateral refunds.
+- Funds freeze on dispute.
+- All evidence must come from authenticated server data.
+- GUI-first UX, minimal slash commands.
+
+End spec.
