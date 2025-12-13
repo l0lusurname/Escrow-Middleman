@@ -69,32 +69,12 @@ class MinecraftBot extends EventEmitter {
       this.emit("spawned");
     });
 
+    // Only use one event handler to avoid duplicate processing
     this.bot.on("message", (jsonMsg, position) => {
+      if (position !== "system") return; // Only process system messages (payment notifications)
       const message = jsonMsg.toString();
-      console.log(`[MC Msg pos=${position}] ${message}`);
+      console.log(`[MC Chat] ${message}`);
       this.handleChatMessage(message);
-    });
-
-    this.bot.on("messagestr", (message, position, jsonMsg) => {
-      console.log(`[MC MsgStr pos=${position}] ${message}`);
-      this.handleChatMessage(message);
-    });
-
-    this.bot._client.on("system_chat", (packet) => {
-      if (packet.content) {
-        try {
-          const parsed = JSON.parse(packet.content);
-          const text = this.extractText(parsed);
-          console.log(`[MC SysChat] ${text}`);
-          this.handleChatMessage(text);
-        } catch (e) {
-          console.log(`[MC SysChat Raw] ${packet.content}`);
-        }
-      }
-    });
-
-    this.bot._client.on("player_chat", (packet) => {
-      console.log(`[MC PlayerChat] ${JSON.stringify(packet)}`);
     });
 
     this.bot.on("kicked", (reason) => {

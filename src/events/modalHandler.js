@@ -234,13 +234,14 @@ async function handleScamModal(interaction) {
       }).where(eq(tickets.tradeId, tradeId));
     }
 
-    await deleteLastBotMessage(interaction.channel);
-
-    await interaction.editReply({
+    const replyMessage = await interaction.editReply({
       content: `${supportMention}Dispute opened for Trade #${tradeId}`,
       embeds: [reportEmbed],
       components: [staffButtons],
     });
+
+    // Delete old bot messages AFTER our reply, excluding our new message
+    await deleteLastBotMessage(interaction.channel, replyMessage.id);
 
     if (config?.staffChannelId) {
       try {
