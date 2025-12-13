@@ -4,6 +4,7 @@ import { trades, tickets, botConfig } from "../../db/schema.js";
 import { eq } from "drizzle-orm";
 import { formatAmount } from "../../utils/currencyParser.js";
 import { logAction } from "../../utils/auditLog.js";
+import { postOrUpdatePublicEmbed } from "../../ui/publicEmbed.js";
 
 function checkAdmin(interaction) {
   return interaction.member.permissions.has(PermissionFlagsBits.Administrator);
@@ -263,5 +264,58 @@ export async function handleDeposit(interaction) {
   } catch (error) {
     console.error("Deposit error:", error);
     await interaction.reply({ content: "An error occurred while marking the deposit.", ephemeral: true });
+  }
+}
+
+export async function handleSetMmChannel(interaction) {
+  if (!checkAdmin(interaction)) {
+    return interaction.reply({ content: "You don't have permission to use this command.", ephemeral: true });
+  }
+
+  const channel = interaction.options.getChannel("channel");
+  const guildId = interaction.guild.id;
+
+  try {
+    const [existing] = await db.select().from(botConfig).where(eq(botConfig.guildId, guildId)).limit(1);
+
+    if (existing) {
+      await db.update(botConfig).set({
+        publicMiddlemanChannelId: channel.id,
+        updatedAt: new Date(),
+      }).where(eq(botConfig.guildId, guildId));
+    } else {
+      await db.insert(botConfig).values({
+        guildId,
+        publicMiddlemanChannelId: channel.id,
+      });
+    }
+
+    await interaction.reply({ content: `Public middleman channel set to ${channel}. Use \`/mm post_embed\` to post the Start Middleman button.` });
+  } catch (error) {
+    console.error("Set MM channel error:", error);
+    await interaction.reply({ content: "An error occurred while setting the channel.", ephemeral: true });
+  }
+}
+
+export async function handlePostEmbed(interaction) {
+  if (!checkAdmin(interaction)) {
+    return interaction.reply({ content: "You don't have permission to use this command.", ephemeral: true });
+  }
+
+  const guildId = interaction.guild.id;
+
+  try {
+    await interaction.deferReply({ ephemeral: true });
+
+    const message = await postOrUpdatePublicEmbed(interaction.client, guildId);
+
+    if (message) {
+      await interaction.editReply({ content: `Public middleman embed posted/updated successfully!` });
+    } else {
+      await interaction.editReply({ content: `Failed to post embed. Make sure you've set the middleman channel with \`/mm set_mm_channel\` first.` });
+    }
+  } catch (error) {
+    console.error("Post embed error:", error);
+    await interaction.editReply({ content: "An error occurred while posting the embed." });
   }
 }

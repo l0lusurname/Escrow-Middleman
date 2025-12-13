@@ -1,0 +1,133 @@
+Project: Donut SMP Discord MM Ticket Bot (GUI-first, Mineflayer verification to Bunji_MC)
+
+Goal
+Build a Discord GUI-first escrow / middleman (MM) ticket bot for Donut SMP. The bot comes online in Minecraft as Bunji_MC via Mineflayer (host: donut.smp.net, version: 1.21.10), verifies users by requiring each party to pay the bot in-game, creates a public "middle-man" entry with an embed & emoji, spawns private trade channels (tickets) when users start a deal, displays live verification status by editing the embed, holds escrow, takes a 5% fee on completion, and supports a "Mark as Scammed" escalation that tags a configurable support role and opens a staff thread.
+
+Configuration (env / admin UI)
+- DISCORD_BOT_TOKEN
+- MINECRAFT_HOST=donut.smp.net
+- MINECRAFT_VERSION=1.21.10
+- MINECRAFT_ACCOUNT credentials for Mineflayer (Bunji_MC)
+- WEBHOOK_SECRET (optional, for plugin)
+- DATABASE_URL (SQLite/Postgres)
+- PUBLIC_MIDDLEMAN_CHANNEL_ID (where the public embed is posted)
+- PUBLIC_LOG_CHANNEL_ID (final summaries)
+- SUPPORT_ROLE_ID
+- VERIFICATION_MIN=1.00, VERIFICATION_MAX=100.24
+- FEE_PERCENT=5.0
+
+High-level rules
+- Verification is ONLY via exact in-game payment to Bunji_MC (no codes).
+- Verification amounts are random per trade, two decimals, unique.
+- Bot listens to in-game messages (via Mineflayer and optionally signed plugin webhooks) for payment lines. Example patterns:
+  - "<payer> paid you <amount>"
+  - "<ign> has paid you <amount>"
+- Amount parsing supports commas, decimals, and suffixes k/m/b (case-insensitive). Normalize suffixes: k=1e3, m=1e6, b=1e9.
+- Admins = any Discord user with Administrator permission.
+- On dispute, bot tags SUPPORT_ROLE_ID and opens staff escalation thread.
+- All actions are logged with audit entries (timestamps, Discord IDs, MC names, raw evidence).
+
+Public UI: create channel + embed + emoji
+- Bot ensures a visible public channel (configurable). In that channel, bot posts a persistent message with:
+  - Custom emoji :middleman: (use server emoji if available) and title: "Middleman / Escrow — Donut SMP"
+  - Embed content: short step-by-step flow, fee (5%), what verification is, link/button "Start Middleman"
+  - Embed shows compact live status lines (placeholder) that get updated when trades start or verification updates occur (e.g., "Latest: Trade #123 — Awaiting verification").
+- The embed includes a clear "How it works" section:
+  1. Click Start Middleman → bot creates a private trade channel
+  2. Tag the person you want to trade with in the private channel
+  3. Both parties must pay Bunji_MC the verification amounts shown (bot will auto-fill a copyable `/pay` command)
+  4. Once both verified, buyer deposits sale amount to Bunji_MC (escrow)
+  5. Buyer confirms delivery → bot releases funds minus 5% fee
+  6. If scam → click "Mark as Scammed" to tag support
+
+Start flow (button → private channel)
+- "Start Middleman" button (on embed) creates a private text-channel or private thread named `mm-<short-id>` with permissions: buyer, seller (when tagged), Administrators, bot, and optionally support role for staff view.
+- When channel opens, bot posts a welcome embed with:
+  - Step-by-step instructions
+  - Two fields: Seller verification amount and Buyer verification amount (initially "Waiting for amounts" until trade form submitted)
+  - UI elements: form modal to enter sale amount and auto-fill buyer/seller (auto-fill from mention if possible), buttons: `Generate Verification Amounts`, `Cancel Trade`, `Attach Evidence`, `Mark as Scammed`
+- The bot edits the original public embed (or a public status message) to show "Active trade: mm-<id>" and links to the private channel.
+
+Trade setup inside private channel
+- In the private channel, the initiating user must tag the other Discord user they want to make the deal with (bot prompts: "Tag the user you want to trade with").
+- Bot presents a modal or interactive form in-channel to collect:
+  - Seller Minecraft IGN (optional if linked)
+  - Buyer Minecraft IGN (optional if linked)
+  - Sale amount (decimal)
+  - Notes / item description
+- On submit, bot creates trade record, picks two random verification amounts (each between $1.00 and $100.24, two decimals), stores them, and updates the private-channel embed to show:
+  - Seller must pay Bunji_MC: $X.XX
+  - Buyer must pay Bunji_MC: $Y.YY
+  - For each expected payment, show status: ❌ Not paid / ✅ Paid (and timestamp when detected)
+- Bot also updates the public "middleman" embed with a brief status noting the trade exists (no private details).
+
+Verification UI / auto-fill pay command
+- For each verification amount, the bot shows a copyable code block and a `Copy Pay` button which opens a small modal/pop-up containing a pre-filled command:
+  - `/pay Bunji_MC <AMOUNT>`
+  - The modal text is pre-filled with the exact amount; user can copy and paste into the Minecraft chat or client chat box.
+- Additionally show a short example: `In-game chat will show: "<your_ign> has paid you <amount>"` so users know what to expect.
+
+In-game detection & matching
+- Primary detection via Mineflayer connected as Bunji_MC reading chat. Optionally, a signed Spigot/Paper plugin can forward payments to the bot webhook with HMAC for extra reliability.
+- On each incoming chat or forwarded webhook, parse and normalize amount; accept match only when:
+  - payer_mc matches expected party
+  - recipient_mc equals Bunji_MC
+  - normalized amount exactly equals expected verification amount (allow small normalization tolerance only when suffixes used, but verification amounts must match to two decimals)
+- On detection, bot updates the private channel embed status for that party to ✅ Paid (with timestamp and raw evidence attached). The private-channel embed must be edited in-place to reflect live status.
+
+Escrow deposit and holding
+- After both verification payments detected, bot prompts Buyer to deposit sale amount to Bunji_MC.
+- Buyer deposits sale amount in-game to Bunji_MC (plugin or Mineflayer chat detection confirms).
+- On confirmed escrow deposit, bot marks trade IN_ESCROW and displays balance in the private channel embed.
+- Escrow accounting: store sale_amount, fee_percent=5.0, fee_amount = sale_amount * 0.05, seller_payout = sale_amount - fee_amount.
+- Bot holds funds (server-side) until buyer clicks `Confirm Delivery` or `Mark as Scammed` is used.
+
+Completion flow
+- Buyer clicks `Confirm Delivery` button in private channel.
+- Bot triggers server payout to seller (via plugin API or admin action) for seller_payout and marks trade COMPLETED.
+- Bot posts a public summary in PUBLIC_LOG_CHANNEL_ID and tags both Discord users:
+  - `✅ Trade #ID completed | Sale: $A.AA | Fee 5%: $F.FF | Paid to: @Seller @Buyer | Minecraft: seller_mc ↔ buyer_mc`
+- Bot records fee in fee pool and logs all raw evidence.
+
+Mark as Scammed / Support escalation
+- Any participant can click `Mark as Scammed` in the private channel.
+- Bot pins the message, freezes escrow, sets trade status to DISPUTE_OPEN, tags SUPPORT_ROLE_ID, and opens a staff-only escalation thread under a configured staff channel with all raw evidence attached and admin action buttons:
+  - `Freeze Funds`, `Request Evidence`, `Adjudicate → Give Buyer | Give Seller | Split`
+- Admins (Discord Administrator permission) can adjudicate via GUI or `/mm adjudicate` command; bot logs admin actions.
+
+Account linking (optional convenience)
+- Allow optional one-click account link flow in bot profile area:
+  - User clicks "Link Minecraft" → bot gives instructions to pay Bunji_MC a tiny amount or run plugin verify command to confirm ownership. Link stored for autofill.
+
+Edge cases & protections
+- Prevent replay by storing matched raw_line hash and timestamp; only accept first match for each verification amount.
+- Disallow refund by buyer via chat after verification unless admins adjudicate.
+- Reject unauthenticated webhook events; validate HMAC if plugin used.
+- Rate-limit trade creation per user and rate-limit Mark as Scammed to prevent abuse.
+- If an unlinked mc username pays the bot, post in ticket and require linking before auto-matching.
+
+Amount parsing
+- Accept numeric forms: `1000`, `1,000.50`, `2.5k`, `12M`, `3.25b`.
+- Normalize suffixes: k=1e3, m=1e6, b=1e9.
+- Verification amounts are fixed to two decimals and matched exactly after normalization.
+
+Data model (minimal)
+- users: discord_id, mc_username, linked_at
+- trades: id, thread_id, buyer_discord, seller_discord, buyer_mc, seller_mc, sale_amount, fee_amount, status, escrow_balance, verification_amount_buyer, verification_amount_seller, created_at, updated_at
+- payments: id, trade_id, payer_mc, amount, raw_line, timestamp
+- audit_logs: id, trade_id, actor_discord, action, raw_payload, timestamp
+- config: support_role_id, public_channel_id, log_channel_id, mineflayer_opts
+
+Commands & GUI elements (examples)
+- Public embed: `Start Middleman` button
+- Private channel UI: `Generate Verification Amounts`, `Copy Pay` (opens modal with `/pay Bunji_MC <amt>` prefilled), `Confirm Delivery`, `Mark as Scammed`, `Attach Evidence`
+- Admin slash: `/mm adjudicate <trade_id> give seller|buyer <amount> [reason]`, `/mm freeze <trade_id>`, `/mm set-support-role @role`, `/mm set-public-channel #channel`
+
+Deliverables
+- Node.js project: Discord.js v14+, Mineflayer, webhook server, DB migrations, and README
+- Optional Spigot/Paper plugin for secure webhook forwarding (HMAC)
+- Unit tests for amount parsing, webhook auth, and trade lifecycle
+- Example config (MINECRAFT_HOST=donut.smp.net, MINECRAFT_VERSION=1.21.10)
+- Deployment instructions and admin docs
+
+Minimal comments only; implementer may adjust UI microcopy and exact Discord permission scopes as needed.

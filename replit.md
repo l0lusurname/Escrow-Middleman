@@ -1,15 +1,16 @@
 # Donut SMP Escrow Bot
 
-Discord Escrow/Middleman Bot for Minecraft server trades. Provides secure, ticket-based escrow trading with in-game payment verification, 5% fee automation, and scam dispute workflows.
+Discord Escrow/Middleman Bot for Minecraft server trades. Provides secure, GUI-first escrow trading with in-game payment verification via Mineflayer, 5% fee automation, and scam dispute workflows.
 
 ## Overview
 
 This bot manages escrow trades between Minecraft players with:
-- Account linking (Discord ↔ Minecraft usernames)
-- Private trade threads with verification amounts
-- HMAC-authenticated webhooks for in-game payment detection
-- Automatic 5% fee calculation and deduction
-- Scam reporting with support role tagging
+- **GUI-first design**: Public "Start Middleman" button creates private trade channels
+- **Mineflayer integration**: Bot connects to Minecraft as Bunji_MC to detect payments
+- **Payment-based verification**: Both parties pay small amounts to the bot to verify identity
+- **Automatic escrow**: Buyer deposits sale amount, bot holds until delivery confirmed
+- **5% fee**: Automatically calculated and deducted from seller payout
+- **Scam protection**: Dispute system with fund freezing and support escalation
 
 ## Project Structure
 
@@ -29,6 +30,12 @@ src/
 ├── events/
 │   ├── buttonHandler.js  # Button interaction handlers
 │   └── modalHandler.js   # Modal submission handlers
+├── minecraft/
+│   ├── mineflayer.js     # Mineflayer bot connection
+│   └── paymentHandler.js # Payment detection and trade updates
+├── ui/
+│   ├── publicEmbed.js    # Public "Start Middleman" embed
+│   └── tradeChannel.js   # Trade channel UI components
 ├── utils/
 │   ├── currencyParser.js # Amount parsing (k/m/b suffix support)
 │   ├── hmac.js           # HMAC signature verification
@@ -40,18 +47,30 @@ src/
 ## Database Tables
 
 - **linked_accounts**: Discord ↔ Minecraft username mappings
-- **trades**: Trade records with verification amounts and status
-- **verifications**: Payment verification records
-- **tickets**: Trade ticket/thread tracking
+- **trades**: Trade records with verification amounts, status, escrow balance
+- **verifications**: Payment verification records with raw evidence
+- **tickets**: Trade ticket/channel tracking
 - **audit_logs**: Complete action audit trail
-- **bot_config**: Per-guild configuration (channels, roles, secrets)
+- **bot_config**: Per-guild configuration (channels, roles, embed message IDs)
+
+## GUI Flow
+
+1. Admin sets up: `/mm set_mm_channel #channel` then `/mm post_embed`
+2. User clicks "Start Middleman" button in public channel
+3. Private trade channel created, user tags trade partner
+4. User clicks "Setup Trade" and fills modal (role, amounts, usernames)
+5. Both parties pay verification amounts to Bunji_MC in-game
+6. Bot detects payments, updates embed status in real-time
+7. Buyer deposits sale amount to escrow
+8. Buyer clicks "Confirm Delivery" when satisfied
+9. Seller receives payout minus 5% fee
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
 | `/mm link <minecraft_username>` | Link your Discord to Minecraft |
-| `/mm create @user seller_mc buyer_mc amount` | Create new trade |
+| `/mm create @user seller_mc buyer_mc amount` | Create new trade (legacy) |
 | `/mm status <trade_id>` | Check trade status |
 | `/mm deposit <trade_id>` | Mark escrow deposit |
 | `/mm mark_scammed <trade_id> <reason>` | Report scam |
@@ -59,17 +78,10 @@ src/
 | `/mm freeze <trade_id>` | Admin: freeze trade funds |
 | `/mm unfreeze <trade_id>` | Admin: unfreeze trade |
 | `/mm close_ticket <trade_id> [notes]` | Admin: close ticket |
-| `/mm setchannel #channel` | Admin: set announcements channel |
+| `/mm setchannel #channel` | Admin: set completion log channel |
 | `/mm set_support_role @role` | Admin: set support role |
-
-## Webhook Endpoints
-
-- `POST /webhook/payment` - Receive signed payment confirmations from Minecraft plugin
-- `POST /webhook/verify-account` - Receive account verification from plugin
-
-Headers required:
-- `X-HMAC-Signature`: HMAC-SHA256 signature of request body
-- `X-Guild-ID`: Discord guild ID
+| `/mm set_mm_channel #channel` | Admin: set public middleman channel |
+| `/mm post_embed` | Admin: post/refresh public middleman embed |
 
 ## Environment Variables
 
@@ -78,23 +90,41 @@ Required:
 - `DISCORD_CLIENT_ID`: Discord application client ID
 - `DATABASE_URL`: PostgreSQL connection string (auto-provisioned)
 
-Optional per-guild (set via commands or database):
-- `WEBHOOK_SECRET`: HMAC secret for Minecraft plugin authentication
+Optional:
+- `ENABLE_MINEFLAYER`: Set to "true" to enable Minecraft bot connection
+- `MINECRAFT_HOST`: Minecraft server address (default: donut.smp.net)
+- `MINECRAFT_PORT`: Minecraft server port (default: 25565)
+- `MINECRAFT_VERSION`: Minecraft version (default: 1.21.1)
+- `MINECRAFT_USERNAME`: Bot's Minecraft username (default: Bunji_MC)
+- `MINECRAFT_AUTH`: Auth type for Mineflayer (default: offline)
+- `VERIFICATION_MIN`: Min verification amount (default: 1.00)
+- `VERIFICATION_MAX`: Max verification amount (default: 100.24)
+- `FEE_PERCENT`: Fee percentage (default: 5.0)
 
 ## Trade Status Flow
 
 ```
-CREATED → VERIFIED → IN_ESCROW → COMPLETED
-                  ↓
-            DISPUTE_OPEN → (adjudicated) → COMPLETED/CANCELLED
+CREATED → AWAITING_VERIFICATION → VERIFIED → IN_ESCROW → COMPLETED
+                                      ↓
+                               DISPUTE_OPEN → (adjudicated) → COMPLETED/CANCELLED
 ```
+
+## Webhook Endpoints
+
+- `POST /webhook/payment` - Receive signed payment confirmations from Minecraft plugin
+- `POST /webhook/verify-account` - Receive account verification from plugin
+- `GET /health` - Health check endpoint
+
+Headers required for webhooks:
+- `X-HMAC-Signature`: HMAC-SHA256 signature of request body
+- `X-Guild-ID`: Discord guild ID
 
 ## Recent Changes
 
-- Initial implementation (Dec 2024)
-- Full slash command system with /mm namespace
-- Private thread-based trade tickets
-- HMAC webhook authentication
-- Currency parser with k/m/b suffix support
-- 5% automatic fee calculation
-- Scam reporting with support role tagging
+- Dec 2024: Added Mineflayer integration for in-game payment detection
+- Dec 2024: Added GUI-first flow with public embed and "Start Middleman" button
+- Dec 2024: Added private trade channels (not threads) for better visibility
+- Dec 2024: Added Copy Pay button with pre-filled /pay commands
+- Dec 2024: Added live embed updates for verification status
+- Dec 2024: Role selection in trade setup to ensure correct buyer/seller assignment
+- Dec 2024: Initial implementation with slash commands and webhook system

@@ -123,6 +123,19 @@ export const data = new SlashCommandBuilder()
       .addIntegerOption((opt) =>
         opt.setName("trade_id").setDescription("The trade ID").setRequired(true)
       )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("set_mm_channel")
+      .setDescription("Admin: Set the public middleman channel for the Start Middleman button")
+      .addChannelOption((opt) =>
+        opt.setName("channel").setDescription("The channel for the public middleman embed").setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("post_embed")
+      .setDescription("Admin: Post/refresh the public middleman embed in the configured channel")
   );
 
 export async function execute(interaction) {

@@ -13,13 +13,18 @@ import {
   handleSetChannel,
   handleSetSupportRole,
   handleDeposit,
+  handleSetMmChannel,
+  handlePostEmbed,
 } from "./commands/handlers/adminCommands.js";
 import { handleButtonInteraction } from "./events/buttonHandler.js";
 import { handleModalSubmit } from "./events/modalHandler.js";
 import { createWebhookRouter } from "./webhook/paymentWebhook.js";
+import { minecraftBot } from "./minecraft/mineflayer.js";
+import { createPaymentHandler } from "./minecraft/paymentHandler.js";
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+const ENABLE_MINEFLAYER = process.env.ENABLE_MINEFLAYER === "true";
 
 if (!DISCORD_TOKEN) {
   console.error("DISCORD_TOKEN is required. Please set it in your environment variables.");
@@ -42,7 +47,11 @@ const app = express();
 app.use(express.json());
 
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", uptime: process.uptime() });
+  res.json({
+    status: "ok",
+    uptime: process.uptime(),
+    minecraft: ENABLE_MINEFLAYER ? minecraftBot.isConnected() : "disabled",
+  });
 });
 
 app.use("/webhook", createWebhookRouter(client));
@@ -66,8 +75,17 @@ async function registerCommands() {
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}`);
   console.log(`Bot is ready and serving ${readyClient.guilds.cache.size} guild(s)`);
-  
+
   await registerCommands();
+
+  if (ENABLE_MINEFLAYER) {
+    console.log("Mineflayer integration enabled. Connecting to Minecraft...");
+    const paymentHandler = createPaymentHandler(client);
+    minecraftBot.on("payment", paymentHandler);
+    minecraftBot.connect();
+  } else {
+    console.log("Mineflayer integration disabled. Set ENABLE_MINEFLAYER=true to enable.");
+  }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -110,6 +128,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
           case "deposit":
             await handleDeposit(interaction);
             break;
+          case "set_mm_channel":
+            await handleSetMmChannel(interaction);
+            break;
+          case "post_embed":
+            await handlePostEmbed(interaction);
+            break;
           default:
             await interaction.reply({ content: "Unknown subcommand.", ephemeral: true });
         }
@@ -136,7 +160,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 async function start() {
   try {
     console.log("Starting Donut SMP Escrow Bot...");
-    
+
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`Webhook server running on port ${PORT}`);
     });

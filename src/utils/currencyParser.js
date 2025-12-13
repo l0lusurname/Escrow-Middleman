@@ -35,8 +35,8 @@ export function formatAmount(amount) {
 }
 
 export function generateVerificationAmount() {
-  const min = 1.00;
-  const max = 50.23;
+  const min = parseFloat(process.env.VERIFICATION_MIN) || 1.00;
+  const max = parseFloat(process.env.VERIFICATION_MAX) || 100.24;
   const amount = Math.random() * (max - min) + min;
   return Math.round(amount * 100) / 100;
 }
