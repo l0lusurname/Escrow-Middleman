@@ -3,7 +3,16 @@ import { trades, verifications, botConfig } from "../db/schema.js";
 import { eq, and, or } from "drizzle-orm";
 import { logAction } from "../utils/auditLog.js";
 import { amountsMatch, formatAmount } from "../utils/currencyParser.js";
-import { createVerificationEmbed, createVerificationButtons, createEscrowEmbed, createEscrowButtons } from "../ui/tradeChannel.js";
+import { 
+  createVerificationEmbed, 
+  createVerificationButtons, 
+  createEscrowEmbed, 
+  createEscrowButtons,
+  createEscrowFundedEmbed,
+  createEscrowDepositEmbed,
+  createDepositButtons,
+  deleteLastBotMessage
+} from "../ui/tradeChannel.js";
 import { refreshPublicEmbed } from "../ui/publicEmbed.js";
 
 const BOT_MC_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
@@ -122,26 +131,28 @@ async function handleVerificationPayment(discordClient, trade, payerMc, amount, 
       try {
         const channel = await discordClient.channels.fetch(trade.threadId);
         if (channel) {
+          await deleteLastBotMessage(channel);
+
           const sellerVerified = party === "seller" ? true : trade.sellerVerified;
           const buyerVerified = party === "buyer" ? true : trade.buyerVerified;
 
           if (sellerVerified && buyerVerified) {
-            const escrowEmbed = createEscrowEmbed({ ...updatedTrade, escrowBalance: "0.00" });
-            const escrowButtons = createEscrowButtons(trade.id, false);
+            const escrowEmbed = createEscrowDepositEmbed(updatedTrade);
+            const buttons = createDepositButtons(trade.id);
 
             await channel.send({
-              content: `Both parties verified! <@${trade.buyerDiscordId}>, please deposit **${formatAmount(trade.saleAmount)}** to escrow.`,
+              content: `Both verified! <@${trade.buyerDiscordId}>, deposit **${formatAmount(trade.saleAmount)}** to proceed.`,
               embeds: [escrowEmbed],
-              components: [escrowButtons],
+              components: [buttons],
             });
           } else {
             const embed = createVerificationEmbed(updatedTrade, sellerVerified, buyerVerified);
-            const buttons = createVerificationButtons(trade.id, sellerVerified, buyerVerified);
+            const buttons = createVerificationButtons(trade.id);
 
             await channel.send({
-              content: `${party === "seller" ? "Seller" : "Buyer"} verified! Waiting for ${party === "seller" ? "buyer" : "seller"} to verify.`,
+              content: `<@${party === "seller" ? trade.buyerDiscordId : trade.sellerDiscordId}>, your turn to verify.`,
               embeds: [embed],
-              components: buttons,
+              components: [buttons],
             });
           }
         }
@@ -189,17 +200,19 @@ async function handleEscrowDeposit(discordClient, trade, amount, rawLine, timest
       try {
         const channel = await discordClient.channels.fetch(trade.threadId);
         if (channel) {
+          await deleteLastBotMessage(channel);
+
           const updatedTrade = {
             ...trade,
             status: "IN_ESCROW",
             escrowBalance: amount.toFixed(2),
           };
 
-          const escrowEmbed = createEscrowEmbed(updatedTrade);
+          const escrowEmbed = createEscrowFundedEmbed(updatedTrade);
           const escrowButtons = createEscrowButtons(trade.id, true);
 
           await channel.send({
-            content: `Escrow funded! <@${trade.buyerDiscordId}> - confirm delivery when satisfied. <@${trade.sellerDiscordId}> - deliver the goods!`,
+            content: `Escrow funded! <@${trade.sellerDiscordId}>, deliver now. <@${trade.buyerDiscordId}>, confirm when done.`,
             embeds: [escrowEmbed],
             components: [escrowButtons],
           });

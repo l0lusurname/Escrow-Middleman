@@ -1,91 +1,43 @@
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
 import { db } from "../db/index.js";
 import { botConfig, trades } from "../db/schema.js";
-import { eq, desc, and, or } from "drizzle-orm";
+import { eq, desc, and, or, gte, sql } from "drizzle-orm";
 
 const BOT_MC_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
 const FEE_PERCENT = parseFloat(process.env.FEE_PERCENT) || 5.0;
 
-export function createPublicEmbed(activeTrades = []) {
+export function createPublicEmbed() {
   const embed = new EmbedBuilder()
-    .setTitle("🤝 Middleman / Escrow — Donut SMP")
-    .setColor(0x00AE86)
+    .setTitle("Middleman Service")
+    .setColor(0x5865F2)
     .setDescription(
-      `**Safe trading with verified escrow!**\n\n` +
-      `Use our middleman service to securely trade items, accounts, or services. ` +
-      `All trades are verified through in-game payments to **${BOT_MC_USERNAME}**.`
+      `A middleman holds funds securely during a trade to protect both the buyer and seller.\n\n` +
+      `When you use this service, your payment is held in escrow until the buyer confirms they received what was promised. This prevents scams and ensures fair trades.`
     )
     .addFields(
       {
-        name: "📋 How It Works",
-        value:
-          `1️⃣ Click **Start Middleman** below\n` +
-          `2️⃣ A private trade channel is created for you\n` +
-          `3️⃣ Tag the person you want to trade with\n` +
-          `4️⃣ Both parties pay small verification amounts to **${BOT_MC_USERNAME}**\n` +
-          `5️⃣ Once verified, buyer deposits the sale amount to escrow\n` +
-          `6️⃣ Buyer confirms delivery → seller receives funds (minus ${FEE_PERCENT}% fee)\n` +
-          `7️⃣ If something goes wrong, click "Mark as Scammed" for support`,
-        inline: false,
-      },
-      {
-        name: "💰 Fees",
-        value: `**${FEE_PERCENT}%** of the sale amount (deducted from seller's payout)`,
+        name: "Service Fee",
+        value: `**${FEE_PERCENT}%** of the sale amount\n(Deducted from seller's payout)`,
         inline: true,
       },
       {
-        name: "🔒 Verification",
-        value: `Pay a random amount ($1.00 - $100.24) to **${BOT_MC_USERNAME}** in-game`,
+        name: "Payment Account",
+        value: `\`${BOT_MC_USERNAME}\``,
         inline: true,
       }
     )
-    .setFooter({ text: "Donut SMP Middleman Service • Secure Trades" })
+    .setFooter({ text: "Donut SMP • Secure Trading" })
     .setTimestamp();
 
-  if (activeTrades.length > 0) {
-    const statusLines = activeTrades.slice(0, 5).map((trade) => {
-      const statusEmoji = getStatusEmoji(trade.status);
-      return `${statusEmoji} Trade #${trade.id} — ${trade.status.replace(/_/g, " ")}`;
-    });
-
-    embed.addFields({
-      name: "📊 Recent Activity",
-      value: statusLines.join("\n") || "No active trades",
-      inline: false,
-    });
-  }
-
   return embed;
-}
-
-function getStatusEmoji(status) {
-  switch (status) {
-    case "CREATED":
-      return "🆕";
-    case "AWAITING_VERIFICATION":
-      return "⏳";
-    case "VERIFIED":
-      return "✅";
-    case "IN_ESCROW":
-      return "💼";
-    case "COMPLETED":
-      return "🎉";
-    case "DISPUTE_OPEN":
-      return "⚠️";
-    case "CANCELLED":
-      return "❌";
-    default:
-      return "📌";
-  }
 }
 
 export function createStartButton() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("start_middleman")
-      .setLabel("Start Middleman")
+      .setLabel("Start Trade")
       .setStyle(ButtonStyle.Primary)
-      .setEmoji("🤝")
   );
 }
 
@@ -106,21 +58,7 @@ export async function postOrUpdatePublicEmbed(client, guildId) {
       return null;
     }
 
-    const recentTrades = await db
-      .select()
-      .from(trades)
-      .where(
-        or(
-          eq(trades.status, "CREATED"),
-          eq(trades.status, "AWAITING_VERIFICATION"),
-          eq(trades.status, "VERIFIED"),
-          eq(trades.status, "IN_ESCROW")
-        )
-      )
-      .orderBy(desc(trades.createdAt))
-      .limit(5);
-
-    const embed = createPublicEmbed(recentTrades);
+    const embed = createPublicEmbed();
     const button = createStartButton();
 
     if (config.publicEmbedMessageId) {
@@ -149,4 +87,126 @@ export async function postOrUpdatePublicEmbed(client, guildId) {
 
 export async function refreshPublicEmbed(client, guildId) {
   return postOrUpdatePublicEmbed(client, guildId);
+}
+
+export async function getDailyStats(guildId) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  try {
+    const completedToday = await db
+      .select({
+        count: sql`count(*)`,
+        totalVolume: sql`COALESCE(sum(${trades.saleAmount}::numeric), 0)`,
+        totalFees: sql`COALESCE(sum(${trades.feeAmount}::numeric), 0)`,
+      })
+      .from(trades)
+      .where(
+        and(
+          eq(trades.status, "COMPLETED"),
+          gte(trades.updatedAt, today)
+        )
+      );
+
+    const allTimeStats = await db
+      .select({
+        count: sql`count(*)`,
+        totalVolume: sql`COALESCE(sum(${trades.saleAmount}::numeric), 0)`,
+        totalFees: sql`COALESCE(sum(${trades.feeAmount}::numeric), 0)`,
+      })
+      .from(trades)
+      .where(eq(trades.status, "COMPLETED"));
+
+    const activeTrades = await db
+      .select({ count: sql`count(*)` })
+      .from(trades)
+      .where(
+        or(
+          eq(trades.status, "CREATED"),
+          eq(trades.status, "AWAITING_VERIFICATION"),
+          eq(trades.status, "VERIFIED"),
+          eq(trades.status, "IN_ESCROW")
+        )
+      );
+
+    const disputes = await db
+      .select({ count: sql`count(*)` })
+      .from(trades)
+      .where(eq(trades.status, "DISPUTE_OPEN"));
+
+    return {
+      today: {
+        trades: parseInt(completedToday[0]?.count || 0),
+        volume: parseFloat(completedToday[0]?.totalVolume || 0),
+        fees: parseFloat(completedToday[0]?.totalFees || 0),
+      },
+      allTime: {
+        trades: parseInt(allTimeStats[0]?.count || 0),
+        volume: parseFloat(allTimeStats[0]?.totalVolume || 0),
+        fees: parseFloat(allTimeStats[0]?.totalFees || 0),
+      },
+      active: parseInt(activeTrades[0]?.count || 0),
+      disputes: parseInt(disputes[0]?.count || 0),
+    };
+  } catch (error) {
+    console.error("Error getting daily stats:", error);
+    return {
+      today: { trades: 0, volume: 0, fees: 0 },
+      allTime: { trades: 0, volume: 0, fees: 0 },
+      active: 0,
+      disputes: 0,
+    };
+  }
+}
+
+export function createAdminPanelEmbed(stats) {
+  const embed = new EmbedBuilder()
+    .setTitle("Admin Panel")
+    .setColor(0x5865F2)
+    .addFields(
+      {
+        name: "Today's Profit",
+        value: `$${stats.today.fees.toFixed(2)}`,
+        inline: true,
+      },
+      {
+        name: "Today's Volume",
+        value: `$${stats.today.volume.toFixed(2)}`,
+        inline: true,
+      },
+      {
+        name: "Trades Today",
+        value: `${stats.today.trades}`,
+        inline: true,
+      },
+      {
+        name: "All-Time Profit",
+        value: `$${stats.allTime.fees.toFixed(2)}`,
+        inline: true,
+      },
+      {
+        name: "All-Time Volume",
+        value: `$${stats.allTime.volume.toFixed(2)}`,
+        inline: true,
+      },
+      {
+        name: "Total Trades",
+        value: `${stats.allTime.trades}`,
+        inline: true,
+      },
+      {
+        name: "Active Trades",
+        value: `${stats.active}`,
+        inline: true,
+      },
+      {
+        name: "Open Disputes",
+        value: `${stats.disputes}`,
+        inline: true,
+      }
+    )
+    .setFooter({ text: "Last updated" })
+    .setTimestamp();
+
+  return embed;
 }

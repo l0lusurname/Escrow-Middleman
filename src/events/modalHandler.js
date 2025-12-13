@@ -1,10 +1,10 @@
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits } from "discord.js";
+import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionFlagsBits, MessageFlags } from "discord.js";
 import { db } from "../db/index.js";
 import { trades, tickets, verifications, botConfig, linkedAccounts } from "../db/schema.js";
 import { eq, and } from "drizzle-orm";
 import { formatAmount, parseAmount, generateVerificationAmount } from "../utils/currencyParser.js";
 import { logAction } from "../utils/auditLog.js";
-import { createVerificationEmbed, createVerificationButtons } from "../ui/tradeChannel.js";
+import { createVerificationEmbed, createVerificationButtons, deleteLastBotMessage } from "../ui/tradeChannel.js";
 import { refreshPublicEmbed } from "../ui/publicEmbed.js";
 
 const BOT_MC_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
@@ -34,29 +34,29 @@ async function handleTradeSetupModal(interaction) {
     if (yourRole !== "seller" && yourRole !== "buyer") {
       return interaction.reply({
         content: "Please type either 'seller' or 'buyer' for your role.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
     const saleAmount = parseAmount(saleAmountStr);
     if (!saleAmount || saleAmount <= 0) {
       return interaction.reply({
-        content: "Invalid sale amount. Please use a valid number (supports k/m/b suffixes).",
-        ephemeral: true,
+        content: "Invalid sale amount.",
+        flags: MessageFlags.Ephemeral,
       });
     }
 
     if (!yourMc || !otherMc) {
       return interaction.reply({
         content: "Both Minecraft usernames are required.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
     if (yourMc.toLowerCase() === otherMc.toLowerCase()) {
       return interaction.reply({
         content: "Seller and buyer cannot be the same person.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
@@ -81,7 +81,7 @@ async function handleTradeSetupModal(interaction) {
 
     if (!otherPartyId) {
       return interaction.editReply({
-        content: "Please tag the other party in this channel first, then click Setup Trade again.",
+        content: "Tag the other party first, then click Setup Trade again.",
       });
     }
 
@@ -125,19 +125,19 @@ async function handleTradeSetupModal(interaction) {
       console.error("Could not add other party to channel:", e);
     }
 
+    await deleteLastBotMessage(channel);
+
     const embed = createVerificationEmbed(newTrade, false, false);
-    const buttons = createVerificationButtons(newTrade.id, false, false);
+    const buttons = createVerificationButtons(newTrade.id);
 
     await interaction.editReply({
-      content: `Trade #${newTrade.id} created! <@${sellerDiscordId}> <@${buyerDiscordId}>`,
+      content: `Trade #${newTrade.id} created!\n\n<@${sellerDiscordId}>, pay \`${formatAmount(verificationAmountSeller)}\` to verify.\n<@${buyerDiscordId}>, pay \`${formatAmount(verificationAmountBuyer)}\` to verify.`,
       embeds: [embed],
-      components: buttons,
+      components: [buttons],
     });
 
     if (notes) {
-      await channel.send({
-        content: `**Trade Notes:** ${notes}`,
-      });
+      await channel.send({ content: `**Notes:** ${notes}` });
     }
 
     await logAction(newTrade.id, initiatorId, "TRADE_CREATED", {
@@ -146,18 +146,15 @@ async function handleTradeSetupModal(interaction) {
       sellerMc,
       buyerMc,
       saleAmount,
-      verificationAmountBuyer,
-      verificationAmountSeller,
-      notes,
     });
 
     await refreshPublicEmbed(interaction.client, interaction.guild.id);
   } catch (error) {
     console.error("Trade setup modal error:", error);
     if (interaction.deferred) {
-      await interaction.editReply({ content: "An error occurred while creating the trade." });
+      await interaction.editReply({ content: "An error occurred." });
     } else {
-      await interaction.reply({ content: "An error occurred.", ephemeral: true });
+      await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
     }
   }
 }
@@ -170,15 +167,15 @@ async function handleScamModal(interaction) {
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: "Trade not found.", ephemeral: true });
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
     }
 
     const userId = interaction.user.id;
 
     if (trade.status === "COMPLETED" || trade.status === "CANCELLED") {
       return interaction.reply({ 
-        content: `This trade is already ${trade.status.toLowerCase()} and cannot be disputed.`, 
-        ephemeral: true 
+        content: `Trade already ${trade.status.toLowerCase()}.`, 
+        flags: MessageFlags.Ephemeral 
       });
     }
 
@@ -193,45 +190,33 @@ async function handleScamModal(interaction) {
     const guild = interaction.guild;
     const [config] = await db.select().from(botConfig).where(eq(botConfig.guildId, guild.id)).limit(1);
 
-    const tradeVerifications = await db.select().from(verifications).where(eq(verifications.tradeId, tradeId));
-
-    const evidenceLines = tradeVerifications
-      .map((v) => `\`${v.rawLine || "No raw data"}\` - ${v.timestamp}`)
-      .join("\n") || "No verification evidence recorded";
-
     const reportEmbed = new EmbedBuilder()
-      .setTitle(`SCAM REPORT - Trade #${tradeId}`)
+      .setTitle("Dispute Opened")
       .setColor(0xFF0000)
       .addFields(
         { name: "Reported By", value: `<@${userId}>`, inline: true },
-        { name: "Trade Status", value: "DISPUTE_OPEN (Frozen)", inline: true },
+        { name: "Trade", value: `#${tradeId}`, inline: true },
+        { name: "Status", value: "Frozen", inline: true },
         { name: "Sale Amount", value: formatAmount(trade.saleAmount), inline: true },
-        { name: "Seller", value: `<@${trade.sellerDiscordId}> (${trade.sellerMc})`, inline: true },
-        { name: "Buyer", value: `<@${trade.buyerDiscordId}> (${trade.buyerMc})`, inline: true },
-        { name: "Escrow Balance", value: formatAmount(trade.escrowBalance || 0), inline: true },
-        { name: "Reason", value: reason },
-        { name: "Evidence (Raw Chat Lines)", value: evidenceLines.substring(0, 1000) },
+        { name: "Seller", value: `<@${trade.sellerDiscordId}>`, inline: true },
+        { name: "Buyer", value: `<@${trade.buyerDiscordId}>`, inline: true },
+        { name: "Reason", value: reason }
       )
       .setTimestamp();
 
     const staffButtons = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`freeze_${tradeId}`)
-        .setLabel("Freeze Funds")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(true),
-      new ButtonBuilder()
         .setCustomId(`adj_seller_${tradeId}`)
-        .setLabel("Give to Seller")
-        .setStyle(ButtonStyle.Primary),
+        .setLabel("Release to Seller")
+        .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`adj_buyer_${tradeId}`)
-        .setLabel("Give to Buyer")
+        .setLabel("Refund Buyer")
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
-        .setCustomId(`close_dispute_${tradeId}`)
-        .setLabel("Close Ticket")
-        .setStyle(ButtonStyle.Danger),
+        .setCustomId(`attach_evidence_${tradeId}`)
+        .setLabel("Add Evidence")
+        .setStyle(ButtonStyle.Secondary)
     );
 
     let supportMention = "";
@@ -243,24 +228,20 @@ async function handleScamModal(interaction) {
       }).where(eq(tickets.tradeId, tradeId));
     }
 
-    const pinnedMsg = await interaction.channel.send({
-      content: `${supportMention}**SCAM REPORTED**`,
+    await deleteLastBotMessage(interaction.channel);
+
+    await interaction.editReply({
+      content: `${supportMention}Dispute opened for Trade #${tradeId}`,
       embeds: [reportEmbed],
       components: [staffButtons],
     });
-
-    try {
-      await pinnedMsg.pin();
-    } catch (e) {
-      console.error("Could not pin message:", e);
-    }
 
     if (config?.staffChannelId) {
       try {
         const staffChannel = await guild.channels.fetch(config.staffChannelId);
         if (staffChannel) {
           await staffChannel.send({
-            content: `${supportMention}New scam report for Trade #${tradeId}`,
+            content: `${supportMention}Dispute: Trade #${tradeId}`,
             embeds: [reportEmbed],
             components: [staffButtons],
           });
@@ -270,19 +251,14 @@ async function handleScamModal(interaction) {
       }
     }
 
-    await logAction(tradeId, userId, "MARK_SCAMMED", { reason, previousStatus: trade.status });
-
-    await interaction.editReply({
-      content: `Trade #${tradeId} has been reported as a scam. The trade is now frozen and support has been notified.`,
-    });
-
+    await logAction(tradeId, userId, "DISPUTE_OPENED", { reason });
     await refreshPublicEmbed(interaction.client, guild.id);
   } catch (error) {
     console.error("Scam modal error:", error);
     if (interaction.deferred) {
-      await interaction.editReply({ content: "An error occurred while reporting the scam." });
+      await interaction.editReply({ content: "An error occurred." });
     } else {
-      await interaction.reply({ content: "An error occurred.", ephemeral: true });
+      await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
     }
   }
 }
@@ -295,17 +271,17 @@ async function handleEvidenceModal(interaction) {
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: "Trade not found.", ephemeral: true });
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
     }
 
-    await logAction(tradeId, interaction.user.id, "EVIDENCE_ATTACHED", { evidence });
+    await logAction(tradeId, interaction.user.id, "EVIDENCE_ADDED", { evidence });
 
     const embed = new EmbedBuilder()
-      .setTitle(`Evidence Attached - Trade #${tradeId}`)
-      .setColor(0x00AE86)
+      .setTitle("Evidence Added")
+      .setColor(0x5865F2)
       .addFields(
-        { name: "Submitted By", value: `<@${interaction.user.id}>`, inline: true },
-        { name: "Trade ID", value: `#${tradeId}`, inline: true },
+        { name: "From", value: `<@${interaction.user.id}>`, inline: true },
+        { name: "Trade", value: `#${tradeId}`, inline: true },
         { name: "Evidence", value: evidence.substring(0, 1024) }
       )
       .setTimestamp();
@@ -313,6 +289,6 @@ async function handleEvidenceModal(interaction) {
     await interaction.reply({ embeds: [embed] });
   } catch (error) {
     console.error("Evidence modal error:", error);
-    await interaction.reply({ content: "An error occurred.", ephemeral: true });
+    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
   }
 }

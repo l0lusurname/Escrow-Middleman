@@ -136,6 +136,11 @@ export const data = new SlashCommandBuilder()
     sub
       .setName("post_embed")
       .setDescription("Admin: Post/refresh the public middleman embed in the configured channel")
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("stats")
+      .setDescription("Admin: View daily profit and trade statistics")
   );
 
 export async function execute(interaction) {

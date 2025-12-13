@@ -1,10 +1,21 @@
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } from "discord.js";
+import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags } from "discord.js";
 import { db } from "../db/index.js";
 import { trades, tickets, botConfig } from "../db/schema.js";
 import { eq } from "drizzle-orm";
 import { formatAmount } from "../utils/currencyParser.js";
 import { logAction } from "../utils/auditLog.js";
-import { createTradeChannel, createTradeSetupModal, createVerificationEmbed, createVerificationButtons } from "../ui/tradeChannel.js";
+import { 
+  createTradeChannel, 
+  createTradeSetupModal, 
+  createVerificationEmbed, 
+  createVerificationButtons,
+  createEscrowEmbed,
+  createEscrowButtons,
+  createCompletedEmbed,
+  createDisputeEmbed,
+  createDisputeButtons,
+  deleteLastBotMessage
+} from "../ui/tradeChannel.js";
 import { refreshPublicEmbed } from "../ui/publicEmbed.js";
 
 const BOT_MC_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
@@ -47,7 +58,7 @@ async function handleStartMiddleman(interaction) {
   } catch (error) {
     console.error("Start middleman error:", error);
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: "Failed to start trade. Please try again.", ephemeral: true });
+      await interaction.reply({ content: "Failed to start trade. Please try again.", flags: MessageFlags.Ephemeral });
     }
   }
 }
@@ -59,17 +70,16 @@ async function handleSetupTrade(interaction) {
     await interaction.showModal(modal);
   } catch (error) {
     console.error("Setup trade error:", error);
-    await interaction.reply({ content: "Failed to open trade setup. Please try again.", ephemeral: true });
+    await interaction.reply({ content: "Failed to open trade setup. Please try again.", flags: MessageFlags.Ephemeral });
   }
 }
 
 async function handleCancelChannel(interaction) {
-  const shortId = interaction.customId.split("_").slice(2).join("_");
   try {
-    await interaction.reply({ content: "Trade cancelled. This channel will be deleted in 10 seconds...", ephemeral: false });
+    await interaction.reply({ content: "Trade cancelled. Channel closing in 10 seconds..." });
     setTimeout(async () => {
       try {
-        await interaction.channel.delete("Trade cancelled by user");
+        await interaction.channel.delete("Trade cancelled");
       } catch (e) {
         console.error("Could not delete channel:", e);
       }
@@ -86,7 +96,7 @@ async function handleCopyPay(interaction, party) {
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: "Trade not found.", ephemeral: true });
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
     }
 
     const amount = party === "seller"
@@ -95,20 +105,13 @@ async function handleCopyPay(interaction, party) {
 
     const payCommand = `/pay ${BOT_MC_USERNAME} ${amount.toFixed(2)}`;
 
-    const embed = new EmbedBuilder()
-      .setTitle(`Copy Pay Command - ${party === "seller" ? "Seller" : "Buyer"}`)
-      .setColor(0x00AE86)
-      .setDescription(
-        `**Copy this command and paste it in Minecraft:**\n\n` +
-        `\`\`\`\n${payCommand}\n\`\`\`\n\n` +
-        `After paying, the bot will automatically detect your payment.`
-      )
-      .setFooter({ text: `Amount: $${amount.toFixed(2)} • Recipient: ${BOT_MC_USERNAME}` });
-
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.reply({ 
+      content: `Copy this command:\n\`\`\`${payCommand}\`\`\``, 
+      flags: MessageFlags.Ephemeral 
+    });
   } catch (error) {
     console.error("Copy pay error:", error);
-    await interaction.reply({ content: "An error occurred.", ephemeral: true });
+    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
   }
 }
 
@@ -119,39 +122,27 @@ async function handleDepositEscrow(interaction) {
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: "Trade not found.", ephemeral: true });
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
     }
 
     if (trade.buyerDiscordId !== interaction.user.id) {
-      return interaction.reply({ content: "Only the buyer can deposit to escrow.", ephemeral: true });
+      return interaction.reply({ content: "Only the buyer can deposit to escrow.", flags: MessageFlags.Ephemeral });
     }
 
     if (!trade.buyerVerified || !trade.sellerVerified) {
-      return interaction.reply({ content: "Both parties must be verified first.", ephemeral: true });
+      return interaction.reply({ content: "Both parties must be verified first.", flags: MessageFlags.Ephemeral });
     }
 
     const saleAmount = parseFloat(trade.saleAmount);
     const payCommand = `/pay ${BOT_MC_USERNAME} ${saleAmount.toFixed(2)}`;
 
-    const embed = new EmbedBuilder()
-      .setTitle("Deposit to Escrow")
-      .setColor(0xFFAA00)
-      .setDescription(
-        `**Deposit the sale amount to escrow:**\n\n` +
-        `\`\`\`\n${payCommand}\n\`\`\`\n\n` +
-        `The bot will hold this amount until you confirm delivery.\n` +
-        `Once you're satisfied with the trade, click "Confirm Delivery".`
-      )
-      .addFields(
-        { name: "Sale Amount", value: formatAmount(saleAmount), inline: true },
-        { name: "Recipient", value: BOT_MC_USERNAME, inline: true }
-      )
-      .setFooter({ text: "Funds are held securely until you confirm delivery" });
-
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.reply({ 
+      content: `Deposit to escrow:\n\`\`\`${payCommand}\`\`\`\nThe bot will detect your payment automatically.`, 
+      flags: MessageFlags.Ephemeral 
+    });
   } catch (error) {
     console.error("Deposit escrow error:", error);
-    await interaction.reply({ content: "An error occurred.", ephemeral: true });
+    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
   }
 }
 
@@ -162,22 +153,22 @@ async function handleConfirmDelivered(interaction) {
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: "Trade not found.", ephemeral: true });
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
     }
 
     if (trade.buyerDiscordId !== interaction.user.id) {
-      return interaction.reply({ content: "Only the buyer can confirm delivery.", ephemeral: true });
+      return interaction.reply({ content: "Only the buyer can confirm delivery.", flags: MessageFlags.Ephemeral });
     }
 
     if (trade.status !== "IN_ESCROW") {
-      return interaction.reply({ content: "Trade must be in escrow to confirm delivery.", ephemeral: true });
+      return interaction.reply({ content: "Trade must be in escrow to confirm delivery.", flags: MessageFlags.Ephemeral });
     }
 
     if (trade.frozen) {
-      return interaction.reply({ content: "Trade is frozen. Contact support.", ephemeral: true });
+      return interaction.reply({ content: "Trade is frozen. Contact support.", flags: MessageFlags.Ephemeral });
     }
 
-    await interaction.deferReply();
+    await interaction.deferUpdate();
 
     const saleAmount = parseFloat(trade.saleAmount);
     const feeAmount = saleAmount * 0.05;
@@ -197,22 +188,15 @@ async function handleConfirmDelivered(interaction) {
 
     await logAction(tradeId, interaction.user.id, "DELIVERY_CONFIRMED", { feeAmount, sellerReceives });
 
-    const completionEmbed = new EmbedBuilder()
-      .setTitle(`Trade #${tradeId} Completed`)
-      .setColor(0x00FF00)
-      .addFields(
-        { name: "Sale Amount", value: formatAmount(saleAmount), inline: true },
-        { name: "Fee (5%)", value: formatAmount(feeAmount), inline: true },
-        { name: "Seller Received", value: formatAmount(sellerReceives), inline: true },
-        { name: "Seller", value: `<@${trade.sellerDiscordId}> (${trade.sellerMc})`, inline: true },
-        { name: "Buyer", value: `<@${trade.buyerDiscordId}> (${trade.buyerMc})`, inline: true },
-      )
-      .setDescription(`Release **${formatAmount(sellerReceives)}** to \`${trade.sellerMc}\` in-game.`)
-      .setTimestamp();
+    try {
+      await interaction.message.delete();
+    } catch (e) {}
 
-    await interaction.editReply({
-      content: `Trade #${tradeId} has been completed!`,
-      embeds: [completionEmbed],
+    const completedEmbed = createCompletedEmbed(trade, feeAmount, sellerReceives);
+
+    await interaction.channel.send({
+      content: `<@${trade.sellerDiscordId}> <@${trade.buyerDiscordId}>`,
+      embeds: [completedEmbed],
     });
 
     const guild = interaction.guild;
@@ -222,10 +206,7 @@ async function handleConfirmDelivered(interaction) {
       try {
         const channel = await guild.channels.fetch(config.completionChannelId);
         if (channel) {
-          await channel.send({
-            content: `Trade #${tradeId} completed! <@${trade.sellerDiscordId}> <@${trade.buyerDiscordId}>`,
-            embeds: [completionEmbed],
-          });
+          await channel.send({ embeds: [completedEmbed] });
         }
       } catch (e) {
         console.error("Could not post to completion channel:", e);
@@ -235,10 +216,8 @@ async function handleConfirmDelivered(interaction) {
     await refreshPublicEmbed(interaction.client, guild.id);
   } catch (error) {
     console.error("Confirm delivered error:", error);
-    if (interaction.deferred) {
-      await interaction.editReply({ content: "An error occurred." });
-    } else {
-      await interaction.reply({ content: "An error occurred.", ephemeral: true });
+    if (!interaction.replied) {
+      await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
     }
   }
 }
@@ -250,24 +229,24 @@ async function handleMarkScammedButton(interaction) {
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: "Trade not found.", ephemeral: true });
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
     }
 
     const userId = interaction.user.id;
     if (trade.sellerDiscordId !== userId && trade.buyerDiscordId !== userId) {
-      return interaction.reply({ content: "Only trade participants can report a scam.", ephemeral: true });
+      return interaction.reply({ content: "Only trade participants can report an issue.", flags: MessageFlags.Ephemeral });
     }
 
     const modal = new ModalBuilder()
       .setCustomId(`scam_modal_${tradeId}`)
-      .setTitle(`Report Scam - Trade #${tradeId}`)
+      .setTitle("Report Issue")
       .addComponents(
         new ActionRowBuilder().addComponents(
           new TextInputBuilder()
             .setCustomId("reason")
-            .setLabel("Reason for Report")
+            .setLabel("What went wrong?")
             .setStyle(TextInputStyle.Paragraph)
-            .setPlaceholder("Describe what happened...")
+            .setPlaceholder("Describe the issue...")
             .setRequired(true)
             .setMaxLength(1000)
         )
@@ -276,7 +255,7 @@ async function handleMarkScammedButton(interaction) {
     await interaction.showModal(modal);
   } catch (error) {
     console.error("Mark scammed button error:", error);
-    await interaction.reply({ content: "An error occurred.", ephemeral: true });
+    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
   }
 }
 
@@ -287,22 +266,22 @@ async function handleRequestCancel(interaction) {
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: "Trade not found.", ephemeral: true });
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
     }
 
     const userId = interaction.user.id;
     if (trade.sellerDiscordId !== userId && trade.buyerDiscordId !== userId) {
-      return interaction.reply({ content: "Only trade participants can request cancellation.", ephemeral: true });
+      return interaction.reply({ content: "Only trade participants can cancel.", flags: MessageFlags.Ephemeral });
     }
 
     await logAction(tradeId, userId, "CANCELLATION_REQUESTED", {});
 
     await interaction.reply({
-      content: `<@${trade.sellerDiscordId}> <@${trade.buyerDiscordId}> - A cancellation has been requested by <@${userId}>. Both parties must agree to cancel. An admin can use \`/mm close_ticket ${tradeId}\` to finalize.`,
+      content: `<@${trade.sellerDiscordId}> <@${trade.buyerDiscordId}> - Cancellation requested by <@${userId}>. An admin can finalize with \`/mm close_ticket ${tradeId}\`.`,
     });
   } catch (error) {
     console.error("Request cancel error:", error);
-    await interaction.reply({ content: "An error occurred.", ephemeral: true });
+    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
   }
 }
 
@@ -310,21 +289,21 @@ async function handleAdjudicateButton(interaction, decision) {
   const tradeId = parseInt(interaction.customId.split("_").pop());
 
   if (!interaction.member.permissions.has("Administrator")) {
-    return interaction.reply({ content: "Only admins can adjudicate trades.", ephemeral: true });
+    return interaction.reply({ content: "Admin only.", flags: MessageFlags.Ephemeral });
   }
 
   try {
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: "Trade not found.", ephemeral: true });
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
     }
 
     if (trade.status === "COMPLETED" || trade.status === "CANCELLED") {
-      return interaction.reply({ content: `Trade is already ${trade.status.toLowerCase()}.`, ephemeral: true });
+      return interaction.reply({ content: `Trade already ${trade.status.toLowerCase()}.`, flags: MessageFlags.Ephemeral });
     }
 
-    await interaction.deferReply();
+    await interaction.deferUpdate();
 
     const saleAmount = parseFloat(trade.saleAmount);
     const feeAmount = saleAmount * 0.05;
@@ -353,26 +332,27 @@ async function handleAdjudicateButton(interaction, decision) {
       updatedAt: new Date(),
     }).where(eq(tickets.tradeId, tradeId));
 
-    await logAction(tradeId, interaction.user.id, "ADJUDICATED_VIA_BUTTON", { decision, amountReleased });
+    await logAction(tradeId, interaction.user.id, "ADJUDICATED", { decision, amountReleased });
+
+    try {
+      await interaction.message.delete();
+    } catch (e) {}
 
     const embed = new EmbedBuilder()
-      .setTitle(`Trade #${tradeId} Adjudicated`)
+      .setTitle("Dispute Resolved")
       .setColor(0x00FF00)
-      .addFields(
-        { name: "Decision", value: `Funds released to ${decision}`, inline: true },
-        { name: "Recipient", value: `<@${recipientId}> (${recipientMc})`, inline: true },
-        { name: "Amount Released", value: formatAmount(amountReleased), inline: true },
-        { name: "Adjudicator", value: `<@${interaction.user.id}>` },
+      .setDescription(
+        `Funds released to ${decision}.\n\n` +
+        `<@${recipientId}> (${recipientMc}) receives **${formatAmount(amountReleased)}**.`
       )
+      .setFooter({ text: `Resolved by ${interaction.user.tag}` })
       .setTimestamp();
 
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.channel.send({ embeds: [embed] });
   } catch (error) {
     console.error("Adjudicate button error:", error);
-    if (interaction.deferred) {
-      await interaction.editReply({ content: "An error occurred." });
-    } else {
-      await interaction.reply({ content: "An error occurred.", ephemeral: true });
+    if (!interaction.replied) {
+      await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
     }
   }
 }
@@ -381,7 +361,7 @@ async function handleCloseDispute(interaction) {
   const tradeId = parseInt(interaction.customId.split("_").pop());
 
   if (!interaction.member.permissions.has("Administrator")) {
-    return interaction.reply({ content: "Only admins can close disputes.", ephemeral: true });
+    return interaction.reply({ content: "Admin only.", flags: MessageFlags.Ephemeral });
   }
 
   try {
@@ -392,10 +372,10 @@ async function handleCloseDispute(interaction) {
 
     await logAction(tradeId, interaction.user.id, "DISPUTE_CLOSED", {});
 
-    await interaction.reply({ content: `Dispute for Trade #${tradeId} has been closed.` });
+    await interaction.reply({ content: `Dispute #${tradeId} closed.` });
   } catch (error) {
     console.error("Close dispute error:", error);
-    await interaction.reply({ content: "An error occurred.", ephemeral: true });
+    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
   }
 }
 
@@ -405,14 +385,14 @@ async function handleAttachEvidence(interaction) {
   try {
     const modal = new ModalBuilder()
       .setCustomId(`evidence_modal_${tradeId}`)
-      .setTitle("Attach Evidence")
+      .setTitle("Add Evidence")
       .addComponents(
         new ActionRowBuilder().addComponents(
           new TextInputBuilder()
             .setCustomId("evidence")
-            .setLabel("Evidence / Notes")
+            .setLabel("Evidence")
             .setStyle(TextInputStyle.Paragraph)
-            .setPlaceholder("Paste screenshots links, describe evidence, etc...")
+            .setPlaceholder("Paste screenshots, links, or describe the evidence...")
             .setRequired(true)
             .setMaxLength(2000)
         )
@@ -421,6 +401,6 @@ async function handleAttachEvidence(interaction) {
     await interaction.showModal(modal);
   } catch (error) {
     console.error("Attach evidence error:", error);
-    await interaction.reply({ content: "An error occurred.", ephemeral: true });
+    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
   }
 }
