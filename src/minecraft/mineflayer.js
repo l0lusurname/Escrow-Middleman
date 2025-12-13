@@ -94,32 +94,41 @@ class MinecraftBot extends EventEmitter {
     });
   }
 
+  normalizeMessage(message) {
+    let clean = message
+      .replace(/§x(§[0-9a-fA-F]){6}/g, '')
+      .replace(/§[0-9a-fklmnorx]/gi, '')
+      .replace(/&x(&[0-9a-fA-F]){6}/g, '')
+      .replace(/&[0-9a-fklmnorx]/gi, '')
+      .replace(/\[[^\]]*\]\s*/g, '')
+      .replace(/[^\x20-\x7E]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return clean;
+  }
+
   handleChatMessage(message) {
     console.log(`[MC Chat] ${message}`);
 
+    const cleanMessage = this.normalizeMessage(message);
+    console.log(`[MC Chat Clean] ${cleanMessage}`);
+
     const paymentPatterns = [
-      /^(\w+) paid you \$?([\d,\.]+[kKmMbB]?)$/i,
-      /^(\w+) has paid you \$?([\d,\.]+[kKmMbB]?)$/i,
-      /^\[Economy\] (\w+) paid you \$?([\d,\.]+[kKmMbB]?)$/i,
-      /^You received \$?([\d,\.]+[kKmMbB]?) from (\w+)$/i,
+      { regex: /(\w{3,16})\s+(?:has\s+)?paid\s+you\s+\$?([\d,\.]+[kKmMbB]?)[.!]?$/i, payerIdx: 1, amountIdx: 2 },
+      { regex: /(\w{3,16})\s+(?:has\s+)?sent\s+you\s+\$?([\d,\.]+[kKmMbB]?)[.!]?$/i, payerIdx: 1, amountIdx: 2 },
+      { regex: /(\w{3,16})\s+just\s+paid\s+you\s+\$?([\d,\.]+[kKmMbB]?)[.!]?$/i, payerIdx: 1, amountIdx: 2 },
+      { regex: /You\s+(?:have\s+)?received\s+\$?([\d,\.]+[kKmMbB]?)\s+from\s+(\w{3,16})[.!]?$/i, payerIdx: 2, amountIdx: 1 },
+      { regex: /(\w{3,16})\s+transferred\s+\$?([\d,\.]+[kKmMbB]?)\s+to\s+you[.!]?$/i, payerIdx: 1, amountIdx: 2 },
     ];
 
-    for (const pattern of paymentPatterns) {
-      const match = message.match(pattern);
+    for (const { regex, payerIdx, amountIdx } of paymentPatterns) {
+      const match = cleanMessage.match(regex);
       if (match) {
-        let payerMc, amountStr;
-
-        if (pattern.toString().includes("received")) {
-          amountStr = match[1];
-          payerMc = match[2];
-        } else {
-          payerMc = match[1];
-          amountStr = match[2];
-        }
-
+        const payerMc = match[payerIdx];
+        const amountStr = match[amountIdx];
         const amount = parseAmount(amountStr);
 
-        if (amount !== null) {
+        if (amount !== null && payerMc.toLowerCase() !== MINECRAFT_USERNAME.toLowerCase()) {
           console.log(`Payment detected: ${payerMc} paid ${amount} to ${MINECRAFT_USERNAME}`);
 
           this.emit("payment", {
@@ -129,8 +138,8 @@ class MinecraftBot extends EventEmitter {
             rawLine: message,
             timestamp: new Date(),
           });
+          return;
         }
-        break;
       }
     }
   }
