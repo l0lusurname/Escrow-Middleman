@@ -127,34 +127,34 @@ export function createTradeSetupModal(shortId) {
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId("your_role")
-          .setLabel("Your Role (type: seller OR buyer)")
+          .setLabel("Your Role (seller or buyer)")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setPlaceholder("seller or buyer")
+          .setPlaceholder("Type: seller or buyer")
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId("sale_amount")
-          .setLabel("Total Price (use k for thousands, m for millions)")
+          .setLabel("Total Price")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setPlaceholder("Examples: 5000, 50k, 2.5m, 1b")
+          .setPlaceholder("e.g., 5000, 50k, 2.5m, 1b")
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId("your_mc")
-          .setLabel("Your Minecraft Name (exactly as in-game)")
+          .setLabel("Your Minecraft Name")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setPlaceholder("YourMinecraftName")
+          .setPlaceholder("Exactly as shown in-game")
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId("other_mc")
-          .setLabel("Trading Partner's Minecraft Name")
+          .setLabel("Partner's Minecraft Name")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setPlaceholder("TheirMinecraftName")
+          .setPlaceholder("Their in-game name")
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
@@ -162,7 +162,7 @@ export function createTradeSetupModal(shortId) {
           .setLabel("What are you trading? (optional)")
           .setStyle(TextInputStyle.Paragraph)
           .setRequired(false)
-          .setPlaceholder("e.g., Diamond pickaxe, 64 emeralds, rank, etc.")
+          .setPlaceholder("e.g., Diamond pickaxe, 64 emeralds, rank")
       )
     );
 }
