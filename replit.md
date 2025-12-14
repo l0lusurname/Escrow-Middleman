@@ -121,6 +121,12 @@ Headers required for webhooks:
 
 ## Recent Changes
 
+- Dec 2024: Major UX improvements - friendlier language, step-by-step instructions, clearer error messages
+- Dec 2024: Enhanced public embed with "How it works" guide
+- Dec 2024: Improved trade channel welcome with numbered steps
+- Dec 2024: Better modal labels with examples (k/m/b suffixes explained)
+- Dec 2024: Clearer verification and escrow embeds with commands in code blocks
+- Dec 2024: Added emojis to buttons for visual clarity
 - Dec 2024: Added Mineflayer integration for in-game payment detection
 - Dec 2024: Added GUI-first flow with public embed and "Start Middleman" button
 - Dec 2024: Added private trade channels (not threads) for better visibility
