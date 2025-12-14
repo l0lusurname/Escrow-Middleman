@@ -7,52 +7,52 @@ import { logAction } from "../utils/auditLog.js";
 
 export const data = new SlashCommandBuilder()
   .setName("mm")
-  .setDescription("Middleman escrow commands")
+  .setDescription("Safe middleman trading commands")
   .addSubcommand((sub) =>
     sub
       .setName("link")
-      .setDescription("Link your Discord account to your Minecraft username")
+      .setDescription("Connect your Discord to your Minecraft account")
       .addStringOption((opt) =>
         opt
           .setName("minecraft_username")
-          .setDescription("Your Minecraft username")
+          .setDescription("Your exact Minecraft username (case-sensitive)")
           .setRequired(true)
       )
   )
   .addSubcommand((sub) =>
     sub
       .setName("create")
-      .setDescription("Create a new escrow trade")
+      .setDescription("Start a new safe trade with someone")
       .addUserOption((opt) =>
-        opt.setName("other_party").setDescription("The other party in the trade").setRequired(true)
+        opt.setName("other_party").setDescription("Who are you trading with? @mention them").setRequired(true)
       )
       .addStringOption((opt) =>
-        opt.setName("seller_mc").setDescription("Seller's Minecraft username").setRequired(true)
+        opt.setName("seller_mc").setDescription("Minecraft name of the seller").setRequired(true)
       )
       .addStringOption((opt) =>
-        opt.setName("buyer_mc").setDescription("Buyer's Minecraft username").setRequired(true)
+        opt.setName("buyer_mc").setDescription("Minecraft name of the buyer").setRequired(true)
       )
       .addStringOption((opt) =>
-        opt.setName("amount").setDescription("Trade amount (supports k/m/b suffixes)").setRequired(true)
+        opt.setName("amount").setDescription("Price (e.g., 5000, 50k, 2.5m)").setRequired(true)
       )
   )
   .addSubcommand((sub) =>
     sub
       .setName("status")
-      .setDescription("Check the status of a trade")
+      .setDescription("Check how your trade is going")
       .addIntegerOption((opt) =>
-        opt.setName("trade_id").setDescription("The trade ID").setRequired(true)
+        opt.setName("trade_id").setDescription("Your trade number (e.g., 123)").setRequired(true)
       )
   )
   .addSubcommand((sub) =>
     sub
       .setName("mark_scammed")
-      .setDescription("Report a trade as a scam")
+      .setDescription("Report a problem with a trade")
       .addIntegerOption((opt) =>
-        opt.setName("trade_id").setDescription("The trade ID").setRequired(true)
+        opt.setName("trade_id").setDescription("The trade number you're having issues with").setRequired(true)
       )
       .addStringOption((opt) =>
-        opt.setName("reason").setDescription("Reason for reporting").setRequired(true)
+        opt.setName("reason").setDescription("What went wrong? Describe the issue").setRequired(true)
       )
   )
   .addSubcommand((sub) =>
@@ -178,7 +178,7 @@ async function handleLink(interaction) {
 
     if (existing.length > 0 && existing[0].verified) {
       return interaction.reply({
-        content: `Your account is already linked to **${existing[0].minecraftUsername}**. Contact staff if you need to change it.`,
+        content: `You're already linked to **${existing[0].minecraftUsername}**!\n\nIf you need to change this, please contact a staff member for help.`,
         ephemeral: true,
       });
     }
@@ -207,13 +207,17 @@ async function handleLink(interaction) {
     await logAction(null, discordId, "LINK_INITIATED", { mcUsername, code });
 
     await interaction.reply({
-      content: `To link your account, run this command in-game:\n\`\`\`/mmverify ${code}\`\`\`\nThis code expires in 10 minutes.`,
+      content: `**Almost there!** Now verify in Minecraft:\n\n` +
+        `**Step 1:** Log into the Minecraft server\n` +
+        `**Step 2:** Type this command in chat:\n\`\`\`/mmverify ${code}\`\`\`\n` +
+        `This code expires in **10 minutes**.\n\n` +
+        `_Once verified, you can start trading safely!_`,
       ephemeral: true,
     });
   } catch (error) {
     console.error("Link error:", error);
     await interaction.reply({
-      content: "An error occurred while linking your account. Please try again.",
+      content: "Something went wrong while setting up your link. Please try again in a moment, or contact staff if it keeps happening.",
       ephemeral: true,
     });
   }

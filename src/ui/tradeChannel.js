@@ -76,26 +76,30 @@ export async function createTradeChannel(interaction) {
     });
 
     const welcomeEmbed = new EmbedBuilder()
-      .setTitle("New Trade")
+      .setTitle("Welcome to Your Trade Channel!")
       .setColor(0x5865F2)
       .setDescription(
-        `Tag the person you want to trade with, then click **Setup Trade** to continue.`
+        `Hey <@${user.id}>! Let's set up your safe trade.\n\n` +
+        `**Step 1:** Tag (@mention) the person you're trading with in this chat\n` +
+        `**Step 2:** Click the green **Setup Trade** button below\n\n` +
+        `_Example: @username I want to buy your items for 50k_`
       )
       .addFields(
-        { name: "Created by", value: `<@${user.id}>`, inline: true },
-        { name: "Status", value: "Waiting for setup", inline: true }
+        { name: "Started by", value: `<@${user.id}>`, inline: true },
+        { name: "Status", value: "Waiting for partner", inline: true }
       )
-      .setFooter({ text: `ID: ${shortId}` })
+      .setFooter({ text: `Trade ID: ${shortId}` })
       .setTimestamp();
 
     const setupButtons = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`setup_trade_${shortId}`)
         .setLabel("Setup Trade")
-        .setStyle(ButtonStyle.Primary),
+        .setStyle(ButtonStyle.Success)
+        .setEmoji("✅"),
       new ButtonBuilder()
         .setCustomId(`cancel_trade_${shortId}`)
-        .setLabel("Cancel")
+        .setLabel("Cancel & Close")
         .setStyle(ButtonStyle.Secondary)
     );
 
@@ -118,12 +122,12 @@ export async function createTradeChannel(interaction) {
 export function createTradeSetupModal(shortId) {
   return new ModalBuilder()
     .setCustomId(`trade_setup_modal_${shortId}`)
-    .setTitle("Trade Setup")
+    .setTitle("Setup Your Trade")
     .addComponents(
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId("your_role")
-          .setLabel("Are you the SELLER or BUYER?")
+          .setLabel("Your Role (type: seller OR buyer)")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setPlaceholder("seller or buyer")
@@ -131,31 +135,34 @@ export function createTradeSetupModal(shortId) {
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId("sale_amount")
-          .setLabel("Sale Amount")
+          .setLabel("Total Price (use k for thousands, m for millions)")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setPlaceholder("e.g., 1000, 5k, 1.5M")
+          .setPlaceholder("Examples: 5000, 50k, 2.5m, 1b")
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId("your_mc")
-          .setLabel("Your Minecraft Username")
+          .setLabel("Your Minecraft Name (exactly as in-game)")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
+          .setPlaceholder("YourMinecraftName")
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId("other_mc")
-          .setLabel("Other Party's Minecraft Username")
+          .setLabel("Trading Partner's Minecraft Name")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
+          .setPlaceholder("TheirMinecraftName")
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId("notes")
-          .setLabel("What is being traded? (Optional)")
+          .setLabel("What are you trading? (optional)")
           .setStyle(TextInputStyle.Paragraph)
           .setRequired(false)
+          .setPlaceholder("e.g., Diamond pickaxe, 64 emeralds, rank, etc.")
       )
     );
 }
@@ -166,18 +173,19 @@ export function createSellerVerificationEmbed(trade) {
   const sellerReceives = saleAmount - feeAmount;
 
   const embed = new EmbedBuilder()
-    .setTitle("Seller Verification Required")
+    .setTitle("Seller: Verify Your Identity")
     .setColor(0xFFA500)
     .setDescription(
-      `<@${trade.sellerDiscordId}>, pay the verification amount below to confirm you're the seller.`
+      `<@${trade.sellerDiscordId}>, please pay a small verification amount to prove you own this Minecraft account.\n\n` +
+      `**Go in-game and type this command:**`
     )
     .addFields(
-      { name: "Amount to Pay", value: `\`/pay ${BOT_MC_USERNAME} ${formatAmount(trade.verificationAmountSeller)}\``, inline: false },
-      { name: "Sale Amount", value: formatAmount(saleAmount), inline: true },
-      { name: "Fee (5%)", value: formatAmount(feeAmount), inline: true },
-      { name: "You'll Receive", value: formatAmount(sellerReceives), inline: true }
+      { name: "Command to Run", value: `\`\`\`/pay ${BOT_MC_USERNAME} ${formatAmount(trade.verificationAmountSeller)}\`\`\``, inline: false },
+      { name: "Sale Price", value: formatAmount(saleAmount), inline: true },
+      { name: "Our Fee (5%)", value: formatAmount(feeAmount), inline: true },
+      { name: "You'll Get", value: `**${formatAmount(sellerReceives)}**`, inline: true }
     )
-    .setFooter({ text: `Trade #${trade.id}` })
+    .setFooter({ text: `Trade #${trade.id} • This is a small verification payment, not the full trade` })
     .setTimestamp();
 
   return embed;
@@ -185,16 +193,17 @@ export function createSellerVerificationEmbed(trade) {
 
 export function createBuyerVerificationEmbed(trade) {
   const embed = new EmbedBuilder()
-    .setTitle("Buyer Verification Required")
+    .setTitle("Buyer: Verify Your Identity")
     .setColor(0xFFA500)
     .setDescription(
-      `<@${trade.buyerDiscordId}>, pay the verification amount below to confirm you're the buyer.`
+      `<@${trade.buyerDiscordId}>, please pay a small verification amount to prove you own this Minecraft account.\n\n` +
+      `**Go in-game and type this command:**`
     )
     .addFields(
-      { name: "Amount to Pay", value: `\`/pay ${BOT_MC_USERNAME} ${formatAmount(trade.verificationAmountBuyer)}\``, inline: false },
-      { name: "Sale Amount", value: formatAmount(trade.saleAmount), inline: true }
+      { name: "Command to Run", value: `\`\`\`/pay ${BOT_MC_USERNAME} ${formatAmount(trade.verificationAmountBuyer)}\`\`\``, inline: false },
+      { name: "Trade Total", value: formatAmount(trade.saleAmount), inline: true }
     )
-    .setFooter({ text: `Trade #${trade.id}` })
+    .setFooter({ text: `Trade #${trade.id} • This is a small verification payment, not the full trade` })
     .setTimestamp();
 
   return embed;
@@ -202,14 +211,14 @@ export function createBuyerVerificationEmbed(trade) {
 
 export function createVerificationCompleteEmbed(trade, party) {
   const embed = new EmbedBuilder()
-    .setTitle(`${party === 'seller' ? 'Seller' : 'Buyer'} Verified`)
+    .setTitle(`${party === 'seller' ? 'Seller' : 'Buyer'} Verified!`)
     .setColor(0x00FF00)
     .setDescription(
       party === 'seller' 
-        ? `<@${trade.sellerDiscordId}> has been verified.`
-        : `<@${trade.buyerDiscordId}> has been verified.`
+        ? `<@${trade.sellerDiscordId}> is now verified as the seller.`
+        : `<@${trade.buyerDiscordId}> is now verified as the buyer.`
     )
-    .setFooter({ text: `Trade #${trade.id}` })
+    .setFooter({ text: `Trade #${trade.id} • Waiting for both parties to verify` })
     .setTimestamp();
 
   return embed;
@@ -219,17 +228,19 @@ export function createEscrowDepositEmbed(trade) {
   const saleAmount = parseFloat(trade.saleAmount);
 
   const embed = new EmbedBuilder()
-    .setTitle("Deposit Required")
+    .setTitle("Both Verified! Time to Deposit")
     .setColor(0xFFA500)
     .setDescription(
-      `<@${trade.buyerDiscordId}>, deposit the sale amount to escrow to proceed.`
+      `Great news! Both of you are verified.\n\n` +
+      `<@${trade.buyerDiscordId}>, now deposit the full payment. We'll hold it safely until the seller delivers.\n\n` +
+      `**Go in-game and type:**`
     )
     .addFields(
-      { name: "Amount to Deposit", value: `\`/pay ${BOT_MC_USERNAME} ${formatAmount(saleAmount)}\``, inline: false },
+      { name: "Command to Run", value: `\`\`\`/pay ${BOT_MC_USERNAME} ${formatAmount(saleAmount)}\`\`\``, inline: false },
       { name: "Seller", value: `<@${trade.sellerDiscordId}>`, inline: true },
       { name: "Buyer", value: `<@${trade.buyerDiscordId}>`, inline: true }
     )
-    .setFooter({ text: `Trade #${trade.id}` })
+    .setFooter({ text: `Trade #${trade.id} • Your money is protected` })
     .setTimestamp();
 
   return embed;
@@ -241,19 +252,22 @@ export function createEscrowFundedEmbed(trade) {
   const sellerReceives = saleAmount - feeAmount;
 
   const embed = new EmbedBuilder()
-    .setTitle("Escrow Funded")
+    .setTitle("Payment Received! Money is Safe")
     .setColor(0x00FF00)
     .setDescription(
-      `Funds are now held securely.\n\n` +
-      `<@${trade.sellerDiscordId}>, deliver the goods to the buyer.\n` +
-      `<@${trade.buyerDiscordId}>, confirm delivery once you receive everything.`
+      `The payment is now held securely by us.\n\n` +
+      `**What happens next:**\n` +
+      `1. <@${trade.sellerDiscordId}> - Deliver the items/service to the buyer now\n` +
+      `2. <@${trade.buyerDiscordId}> - Once you have everything, click **Confirm Delivery**\n` +
+      `3. Seller gets paid automatically!\n\n` +
+      `_If there's any problem, click Report Issue_`
     )
     .addFields(
-      { name: "In Escrow", value: formatAmount(saleAmount), inline: true },
-      { name: "Seller Receives", value: formatAmount(sellerReceives), inline: true },
-      { name: "Status", value: "Awaiting delivery confirmation", inline: true }
+      { name: "Held in Escrow", value: `**${formatAmount(saleAmount)}**`, inline: true },
+      { name: "Seller Gets", value: formatAmount(sellerReceives), inline: true },
+      { name: "Status", value: "Waiting for delivery", inline: true }
     )
-    .setFooter({ text: `Trade #${trade.id}` })
+    .setFooter({ text: `Trade #${trade.id} • Protected by Escrow` })
     .setTimestamp();
 
   return embed;
@@ -263,13 +277,15 @@ export function createEscrowButtons(tradeId, inEscrow) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`confirm_delivered_${tradeId}`)
-      .setLabel("Confirm Delivery")
+      .setLabel("I Received Everything")
       .setStyle(ButtonStyle.Success)
+      .setEmoji("✅")
       .setDisabled(!inEscrow),
     new ButtonBuilder()
       .setCustomId(`mark_scammed_${tradeId}`)
       .setLabel("Report Issue")
       .setStyle(ButtonStyle.Danger)
+      .setEmoji("🚨")
   );
 }
 
@@ -301,18 +317,20 @@ export function createDepositButtons(tradeId) {
 
 export function createCompletedEmbed(trade, feeAmount, sellerReceives) {
   const embed = new EmbedBuilder()
-    .setTitle("Trade Completed")
+    .setTitle("Trade Complete!")
     .setColor(0x00FF00)
     .setDescription(
-      `Trade has been completed successfully!\n\n` +
-      `<@${trade.sellerDiscordId}>, you will receive **${formatAmount(sellerReceives)}**.`
+      `This trade has been completed successfully!\n\n` +
+      `<@${trade.sellerDiscordId}>, **${formatAmount(sellerReceives)}** has been sent to you in-game.\n\n` +
+      `<@${trade.buyerDiscordId}>, thanks for using our middleman service!\n\n` +
+      `_This channel will be archived. You can screenshot this for your records._`
     )
     .addFields(
-      { name: "Sale Amount", value: formatAmount(trade.saleAmount), inline: true },
-      { name: "Fee", value: formatAmount(feeAmount), inline: true },
-      { name: "Seller Receives", value: formatAmount(sellerReceives), inline: true }
+      { name: "Total Paid", value: formatAmount(trade.saleAmount), inline: true },
+      { name: "Service Fee", value: formatAmount(feeAmount), inline: true },
+      { name: "Seller Received", value: `**${formatAmount(sellerReceives)}**`, inline: true }
     )
-    .setFooter({ text: `Trade #${trade.id}` })
+    .setFooter({ text: `Trade #${trade.id} • Completed Successfully` })
     .setTimestamp();
 
   return embed;
@@ -320,17 +338,23 @@ export function createCompletedEmbed(trade, feeAmount, sellerReceives) {
 
 export function createDisputeEmbed(trade, reason) {
   const embed = new EmbedBuilder()
-    .setTitle("Dispute Opened")
+    .setTitle("Trade Paused - Staff Notified")
     .setColor(0xFF0000)
     .setDescription(
-      `A dispute has been opened for this trade. Staff will review shortly.`
+      `This trade has been paused and staff have been notified.\n\n` +
+      `**What happens now:**\n` +
+      `• All funds are frozen and safe\n` +
+      `• Staff will review the situation\n` +
+      `• You may be asked to provide more information\n` +
+      `• A decision will be made fairly\n\n` +
+      `_Please be patient and provide any evidence you have._`
     )
     .addFields(
-      { name: "Trade", value: `#${trade.id}`, inline: true },
-      { name: "Status", value: "Frozen", inline: true },
-      { name: "Reason", value: reason || "No reason provided" }
+      { name: "Trade ID", value: `#${trade.id}`, inline: true },
+      { name: "Status", value: "Frozen & Under Review", inline: true },
+      { name: "Reported Issue", value: reason || "No details provided" }
     )
-    .setFooter({ text: "Staff will resolve this dispute" })
+    .setFooter({ text: "Staff will resolve this as quickly as possible" })
     .setTimestamp();
 
   return embed;
@@ -340,16 +364,19 @@ export function createDisputeButtons(tradeId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId(`adj_seller_${tradeId}`)
-      .setLabel("Release to Seller")
-      .setStyle(ButtonStyle.Success),
+      .setLabel("Pay Seller")
+      .setStyle(ButtonStyle.Success)
+      .setEmoji("💰"),
     new ButtonBuilder()
       .setCustomId(`adj_buyer_${tradeId}`)
       .setLabel("Refund Buyer")
-      .setStyle(ButtonStyle.Primary),
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji("↩️"),
     new ButtonBuilder()
       .setCustomId(`attach_evidence_${tradeId}`)
       .setLabel("Add Evidence")
       .setStyle(ButtonStyle.Secondary)
+      .setEmoji("📎")
   );
 }
 
@@ -358,31 +385,33 @@ export function createVerificationEmbed(trade, sellerVerified = false, buyerVeri
   const feeAmount = saleAmount * (FEE_PERCENT / 100);
   const sellerReceives = saleAmount - feeAmount;
 
-  const sellerStatus = sellerVerified ? "Verified" : "Pending";
-  const buyerStatus = buyerVerified ? "Verified" : "Pending";
+  const sellerStatus = sellerVerified ? "Verified ✓" : "Waiting...";
+  const buyerStatus = buyerVerified ? "Verified ✓" : "Waiting...";
 
   const embed = new EmbedBuilder()
-    .setTitle(`Trade #${trade.id}`)
+    .setTitle(`Trade #${trade.id} - Verification Step`)
     .setColor(sellerVerified && buyerVerified ? 0x00FF00 : 0xFFA500)
     .setDescription(
-      `Both parties must pay their verification amount to \`${BOT_MC_USERNAME}\`.`
+      `**Both of you need to verify your Minecraft accounts.**\n\n` +
+      `Go in-game and use \`/pay ${BOT_MC_USERNAME} [amount]\` with your verification amount below.\n` +
+      `This proves you own the account and protects against impersonation.`
     )
     .addFields(
-      { name: "Sale Amount", value: formatAmount(saleAmount), inline: true },
+      { name: "Trade Total", value: `**${formatAmount(saleAmount)}**`, inline: true },
       { name: "Fee (5%)", value: formatAmount(feeAmount), inline: true },
-      { name: "Seller Receives", value: formatAmount(sellerReceives), inline: true },
+      { name: "Seller Gets", value: formatAmount(sellerReceives), inline: true },
       {
-        name: `Seller (${trade.sellerMc})`,
-        value: `Pay: \`${formatAmount(trade.verificationAmountSeller)}\`\nStatus: ${sellerStatus}`,
+        name: `Seller: ${trade.sellerMc}`,
+        value: `Pay: \`${formatAmount(trade.verificationAmountSeller)}\`\n${sellerStatus}`,
         inline: true,
       },
       {
-        name: `Buyer (${trade.buyerMc})`,
-        value: `Pay: \`${formatAmount(trade.verificationAmountBuyer)}\`\nStatus: ${buyerStatus}`,
+        name: `Buyer: ${trade.buyerMc}`,
+        value: `Pay: \`${formatAmount(trade.verificationAmountBuyer)}\`\n${buyerStatus}`,
         inline: true,
       }
     )
-    .setFooter({ text: `Pay to: ${BOT_MC_USERNAME}` })
+    .setFooter({ text: `Pay these small amounts to: ${BOT_MC_USERNAME}` })
     .setTimestamp();
 
   return embed;
@@ -396,19 +425,19 @@ export function createEscrowEmbed(trade) {
   const inEscrow = escrowBalance >= saleAmount;
 
   const embed = new EmbedBuilder()
-    .setTitle(`Trade #${trade.id}`)
+    .setTitle(`Trade #${trade.id} - ${inEscrow ? 'Ready for Delivery!' : 'Deposit Step'}`)
     .setColor(inEscrow ? 0x00FF00 : 0xFFA500)
     .setDescription(
       inEscrow
-        ? `Escrow funded. Buyer can confirm delivery when ready.`
-        : `Buyer: Deposit \`${formatAmount(saleAmount)}\` to \`${BOT_MC_USERNAME}\`.`
+        ? `Payment is secure! Seller, deliver the goods. Buyer, confirm once you have everything.`
+        : `**Buyer:** Deposit the full amount to continue.\n\nGo in-game and type:\n\`\`\`/pay ${BOT_MC_USERNAME} ${formatAmount(saleAmount)}\`\`\``
     )
     .addFields(
-      { name: "Sale Amount", value: formatAmount(saleAmount), inline: true },
+      { name: "Trade Total", value: `**${formatAmount(saleAmount)}**`, inline: true },
       { name: "In Escrow", value: formatAmount(escrowBalance), inline: true },
-      { name: "Status", value: inEscrow ? "Funded" : "Awaiting deposit", inline: true }
+      { name: "Status", value: inEscrow ? "Ready for delivery" : "Waiting for deposit", inline: true }
     )
-    .setFooter({ text: `Trade #${trade.id}` })
+    .setFooter({ text: `Trade #${trade.id} • ${inEscrow ? 'Protected by Escrow' : 'Deposit to proceed'}` })
     .setTimestamp();
 
   return embed;

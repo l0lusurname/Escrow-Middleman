@@ -63,7 +63,7 @@ async function handleStartMiddleman(interaction) {
   } catch (error) {
     console.error("Start middleman error:", error);
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: "Failed to start trade. Please try again.", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "Couldn't start the trade right now. Please try again in a moment!", flags: MessageFlags.Ephemeral });
     }
   }
 }
@@ -75,13 +75,13 @@ async function handleSetupTrade(interaction) {
     await interaction.showModal(modal);
   } catch (error) {
     console.error("Setup trade error:", error);
-    await interaction.reply({ content: "Failed to open trade setup. Please try again.", flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: "Couldn't open the setup form. Please try clicking the button again!", flags: MessageFlags.Ephemeral });
   }
 }
 
 async function handleCancelChannel(interaction) {
   try {
-    await interaction.reply({ content: "Trade cancelled. Channel closing in 10 seconds..." });
+    await interaction.reply({ content: "No problem! This trade has been cancelled.\n\n_This channel will close in 10 seconds..._" });
     setTimeout(async () => {
       try {
         await interaction.channel.delete("Trade cancelled");
@@ -130,22 +130,22 @@ async function handleDepositEscrow(interaction) {
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.editReply({ content: "Trade not found." });
+      return interaction.editReply({ content: "Hmm, couldn't find that trade. It may have been closed." });
     }
 
     if (trade.buyerDiscordId !== interaction.user.id) {
-      return interaction.editReply({ content: "Only the buyer can deposit to escrow." });
+      return interaction.editReply({ content: "Only the **buyer** can deposit to escrow. If you're the seller, just wait for the buyer to deposit!" });
     }
 
     if (!trade.buyerVerified || !trade.sellerVerified) {
-      return interaction.editReply({ content: "Both parties must be verified first." });
+      return interaction.editReply({ content: "Hold on! Both you and the other person need to verify first. Check the instructions above." });
     }
 
     const saleAmount = parseFloat(trade.saleAmount);
     const payCommand = `/pay ${BOT_MC_USERNAME} ${saleAmount.toFixed(2)}`;
 
     await interaction.editReply({ 
-      content: `Deposit to escrow:\n\`\`\`${payCommand}\`\`\`\nThe bot will detect your payment automatically.` 
+      content: `**Ready to deposit!**\n\nGo in-game and type:\n\`\`\`${payCommand}\`\`\`\nOnce you pay, the bot will automatically detect it and update this trade.` 
     });
   } catch (error) {
     console.error("Deposit escrow error:", error);
@@ -160,19 +160,19 @@ async function handleConfirmDelivered(interaction) {
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: "Couldn't find that trade. It may have been closed already.", flags: MessageFlags.Ephemeral });
     }
 
     if (trade.buyerDiscordId !== interaction.user.id) {
-      return interaction.reply({ content: "Only the buyer can confirm delivery.", flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: "Only the **buyer** can confirm delivery. Seller, wait for the buyer to confirm they got everything!", flags: MessageFlags.Ephemeral });
     }
 
     if (trade.status !== "IN_ESCROW") {
-      return interaction.reply({ content: "Trade must be in escrow to confirm delivery.", flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: "The payment needs to be deposited first before you can confirm delivery.", flags: MessageFlags.Ephemeral });
     }
 
     if (trade.frozen) {
-      return interaction.reply({ content: "Trade is frozen. Contact support.", flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: "This trade is currently frozen due to a dispute. Please wait for staff to resolve it.", flags: MessageFlags.Ephemeral });
     }
 
     await interaction.deferUpdate();

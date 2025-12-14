@@ -33,7 +33,7 @@ async function handleTradeSetupModal(interaction) {
 
     if (yourRole !== "seller" && yourRole !== "buyer") {
       return interaction.reply({
-        content: "Please type either 'seller' or 'buyer' for your role.",
+        content: "Please type exactly **seller** or **buyer** in the role field. Nothing else will work!",
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -41,21 +41,21 @@ async function handleTradeSetupModal(interaction) {
     const saleAmount = parseAmount(saleAmountStr);
     if (!saleAmount || saleAmount <= 0) {
       return interaction.reply({
-        content: "Invalid sale amount.",
+        content: "That amount doesn't look right. Try something like: **5000**, **50k**, **2.5m**, or **1b**",
         flags: MessageFlags.Ephemeral,
       });
     }
 
     if (!yourMc || !otherMc) {
       return interaction.reply({
-        content: "Both Minecraft usernames are required.",
+        content: "You need to fill in both Minecraft usernames - yours and your trading partner's.",
         flags: MessageFlags.Ephemeral,
       });
     }
 
     if (yourMc.toLowerCase() === otherMc.toLowerCase()) {
       return interaction.reply({
-        content: "Seller and buyer cannot be the same person.",
+        content: "The two Minecraft names can't be the same - you need your name AND your trading partner's name.",
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -81,7 +81,7 @@ async function handleTradeSetupModal(interaction) {
 
     if (!otherPartyId) {
       return interaction.editReply({
-        content: "Tag the other party first, then click Setup Trade again.",
+        content: "**Oops!** You need to @mention your trading partner in this channel first.\n\nJust type something like `@TheirName let's trade` then click the Setup Trade button again.",
       });
     }
 
@@ -129,7 +129,7 @@ async function handleTradeSetupModal(interaction) {
     const buttons = createVerificationButtons(newTrade.id);
 
     const replyMessage = await interaction.editReply({
-      content: `Trade #${newTrade.id} created!\n\n<@${sellerDiscordId}>, pay \`${formatAmount(verificationAmountSeller)}\` to verify.\n<@${buyerDiscordId}>, pay \`${formatAmount(verificationAmountBuyer)}\` to verify.`,
+      content: `**Trade #${newTrade.id} is ready!**\n\nNow both of you need to verify your Minecraft accounts:\n\n<@${sellerDiscordId}> (Seller): Go in-game and type \`/pay ${BOT_MC_USERNAME} ${formatAmount(verificationAmountSeller)}\`\n<@${buyerDiscordId}> (Buyer): Go in-game and type \`/pay ${BOT_MC_USERNAME} ${formatAmount(verificationAmountBuyer)}\`\n\n_These are small verification amounts to prove you own the accounts._`,
       embeds: [embed],
       components: [buttons],
     });

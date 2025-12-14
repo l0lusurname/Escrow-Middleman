@@ -8,25 +8,37 @@ const FEE_PERCENT = parseFloat(process.env.FEE_PERCENT) || 5.0;
 
 export function createPublicEmbed() {
   const embed = new EmbedBuilder()
-    .setTitle("Middleman Service")
+    .setTitle("Secure Middleman Trading")
     .setColor(0x5865F2)
     .setDescription(
-      `A middleman holds funds securely during a trade to protect both the buyer and seller.\n\n` +
-      `When you use this service, your payment is held in escrow until the buyer confirms they received what was promised. This prevents scams and ensures fair trades.`
+      `Trade safely with our escrow service! We hold the payment until both sides are happy.\n\n` +
+      `**How it works:**\n` +
+      `1. Click the button below to start\n` +
+      `2. Tag your trading partner in the private channel\n` +
+      `3. Both of you verify your identities with a small payment\n` +
+      `4. Buyer deposits the full amount\n` +
+      `5. Seller delivers the goods\n` +
+      `6. Buyer confirms, seller gets paid!\n\n` +
+      `Your money is protected the entire time.`
     )
     .addFields(
       {
         name: "Service Fee",
-        value: `**${FEE_PERCENT}%** of the sale amount\n(Deducted from seller's payout)`,
+        value: `**${FEE_PERCENT}%** of sale\n_(taken from seller)_`,
         inline: true,
       },
       {
-        name: "Payment Account",
-        value: `\`${BOT_MC_USERNAME}\``,
+        name: "Pay To",
+        value: `\`${BOT_MC_USERNAME}\`\nin Minecraft`,
+        inline: true,
+      },
+      {
+        name: "Need Help?",
+        value: `Tag staff if you\nhave questions`,
         inline: true,
       }
     )
-    .setFooter({ text: "Donut SMP • Secure Trading" })
+    .setFooter({ text: "Donut SMP • Safe & Secure Trading" })
     .setTimestamp();
 
   return embed;
@@ -36,8 +48,9 @@ export function createStartButton() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("start_middleman")
-      .setLabel("Start Trade")
-      .setStyle(ButtonStyle.Primary)
+      .setLabel("Start New Trade")
+      .setStyle(ButtonStyle.Success)
+      .setEmoji("🛡️")
   );
 }
 
