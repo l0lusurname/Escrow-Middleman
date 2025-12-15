@@ -8,37 +8,37 @@ const FEE_PERCENT = parseFloat(process.env.FEE_PERCENT) || 5.0;
 
 export function createPublicEmbed() {
   const embed = new EmbedBuilder()
-    .setTitle("Cryptocurrency Middleman System")
-    .setColor(0x2F3136)
+    .setTitle("Donut SMP Middleman Service")
+    .setColor(0xF5A623)
     .setDescription(
-      `Trade safely with our automated middleman service!\n\n` +
-      `**How it works:**\n` +
-      `1. Click the button below to create a ticket\n` +
-      `2. Tag your trading partner in the ticket\n` +
-      `3. Select your roles (Sender/Receiver)\n` +
-      `4. Sender deposits the payment\n` +
-      `5. Receiver delivers the goods\n` +
-      `6. Sender releases funds to complete the deal\n\n` +
-      `Your funds are protected the entire time.`
+      `Trade your Donut SMP money safely with our trusted middleman service!\n\n` +
+      `**How It Works**\n` +
+      `> **1.** Click the button below to open a ticket\n` +
+      `> **2.** Tag your trading partner\n` +
+      `> **3.** Both users confirm their roles\n` +
+      `> **4.** Sender pays the middleman bot in-game\n` +
+      `> **5.** Receiver delivers the goods/services\n` +
+      `> **6.** Sender releases funds to complete the trade\n\n` +
+      `Your money is held securely until both parties are satisfied!`
     )
     .addFields(
       {
         name: "Service Fee",
-        value: `**${FEE_PERCENT}%** of deal\n_(taken from receiver)_`,
+        value: `**${FEE_PERCENT}%** of trade\n_(deducted from receiver)_`,
         inline: true,
       },
       {
-        name: "Pay To",
-        value: `\`${BOT_MC_USERNAME}\`\nin Minecraft`,
+        name: "Payment IGN",
+        value: `\`${BOT_MC_USERNAME}\``,
         inline: true,
       },
       {
-        name: "Need Help?",
-        value: `Tag staff if you\nhave questions`,
+        name: "Support",
+        value: `Tag staff if needed`,
         inline: true,
       }
     )
-    .setFooter({ text: "Safe & Secure Middleman" })
+    .setFooter({ text: "Donut SMP | Safe & Secure Trading" })
     .setTimestamp();
 
   return embed;
@@ -48,8 +48,9 @@ export function createStartButton() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("start_middleman")
-      .setLabel("Create Ticket")
+      .setLabel("Open Trade Ticket")
       .setStyle(ButtonStyle.Success)
+      .setEmoji("🎫")
   );
 }
 
@@ -173,11 +174,11 @@ export async function getDailyStats(guildId) {
 
 export function createAdminPanelEmbed(stats) {
   const embed = new EmbedBuilder()
-    .setTitle("Admin Panel")
-    .setColor(0x5865F2)
+    .setTitle("Admin Dashboard")
+    .setColor(0xF5A623)
     .addFields(
       {
-        name: "Today's Profit",
+        name: "Today's Earnings",
         value: `$${stats.today.fees.toFixed(2)}`,
         inline: true,
       },
@@ -192,7 +193,7 @@ export function createAdminPanelEmbed(stats) {
         inline: true,
       },
       {
-        name: "All-Time Profit",
+        name: "All-Time Earnings",
         value: `$${stats.allTime.fees.toFixed(2)}`,
         inline: true,
       },
@@ -217,7 +218,7 @@ export function createAdminPanelEmbed(stats) {
         inline: true,
       }
     )
-    .setFooter({ text: "Last updated" })
+    .setFooter({ text: "Donut SMP Middleman Stats" })
     .setTimestamp();
 
   return embed;

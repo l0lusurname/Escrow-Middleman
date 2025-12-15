@@ -43,7 +43,7 @@ async function handleMcUsernamesModal(interaction) {
 
     if (!/^[a-zA-Z0-9_]{3,16}$/.test(senderMc) || !/^[a-zA-Z0-9_]{3,16}$/.test(receiverMc)) {
       return interaction.reply({ 
-        content: "Invalid Minecraft username. Usernames must be 3-16 characters, letters/numbers/underscores only.", 
+        content: "Invalid Minecraft username! Usernames must be 3-16 characters using only letters, numbers, and underscores.", 
         flags: MessageFlags.Ephemeral 
       });
     }
@@ -57,12 +57,18 @@ async function handleMcUsernamesModal(interaction) {
       updatedAt: new Date(),
     }).where(eq(trades.id, tradeId));
 
+    const confirmEmbed = new EmbedBuilder()
+      .setColor(0x57F287)
+      .setTitle("Minecraft Usernames Confirmed")
+      .addFields(
+        { name: "Sender (Paying)", value: `\`${senderMc}\``, inline: true },
+        { name: "Receiver (Getting Paid)", value: `\`${receiverMc}\``, inline: true }
+      );
+
+    await interaction.editReply({ embeds: [confirmEmbed] });
+
     const { createDealAmountEmbed } = await import("../ui/tradeChannel.js");
     const amountEmbed = createDealAmountEmbed();
-
-    await interaction.editReply({ 
-      content: `Minecraft usernames set!\n**Sender:** ${senderMc}\n**Receiver:** ${receiverMc}`,
-    });
 
     await interaction.channel.send({ 
       content: `<@${trade.sellerDiscordId}>`,
@@ -74,9 +80,9 @@ async function handleMcUsernamesModal(interaction) {
     console.error("MC usernames modal error:", error);
     try {
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content: "An error occurred." }).catch(() => {});
+        await interaction.editReply({ content: "Something went wrong. Please try again!" }).catch(() => {});
       } else {
-        await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral }).catch(() => {});
+        await interaction.reply({ content: "Something went wrong. Please try again!", flags: MessageFlags.Ephemeral }).catch(() => {});
       }
     } catch (replyError) {
       console.error("Could not send error response:", replyError);
@@ -88,7 +94,7 @@ export async function handlePartnerMention(message) {
   if (message.author.bot) return;
   
   const channel = message.channel;
-  if (!channel.name?.startsWith("ticket-")) return;
+  if (!channel.name?.startsWith("trade-") && !channel.name?.startsWith("ticket-")) return;
   
   const mentionedUsers = message.mentions.users.filter(u => u.id !== message.author.id && !u.bot);
   if (mentionedUsers.size === 0) return;
@@ -106,8 +112,9 @@ export async function handlePartnerMention(message) {
     });
 
     const addedEmbed = new EmbedBuilder()
-      .setColor(0x00FF00)
-      .setDescription(`Successfully added <@${otherUser.id}> to the ticket.`);
+      .setColor(0x57F287)
+      .setTitle("Partner Added!")
+      .setDescription(`<@${otherUser.id}> has been added to this trade ticket.`);
 
     await channel.send({ embeds: [addedEmbed] });
 
@@ -137,11 +144,6 @@ export async function handlePartnerMention(message) {
 
     await channel.send({ embeds: [roleEmbed], components: [roleButtons] });
 
-    const confirmEmbed = createConfirmRolesEmbed(newTrade);
-    const confirmButtons = createConfirmRolesButtons(newTrade.id);
-
-    await channel.send({ embeds: [confirmEmbed], components: [confirmButtons] });
-
     await logAction(newTrade.id, message.author.id, "TRADE_CREATED", {
       sellerDiscordId: message.author.id,
       buyerDiscordId: otherUser.id,
@@ -149,7 +151,7 @@ export async function handlePartnerMention(message) {
 
   } catch (error) {
     console.error("Error handling partner mention:", error);
-    await channel.send({ content: "Failed to add user to ticket. Please try again." });
+    await channel.send({ content: "Failed to add user to ticket. Please try again or contact support." });
   }
 }
 
@@ -157,7 +159,7 @@ export async function handleAmountMessage(message) {
   if (message.author.bot) return;
   
   const channel = message.channel;
-  if (!channel.name?.startsWith("ticket-")) return;
+  if (!channel.name?.startsWith("trade-") && !channel.name?.startsWith("ticket-")) return;
 
   const [trade] = await db.select().from(trades).where(
     and(
@@ -172,7 +174,16 @@ export async function handleAmountMessage(message) {
 
   const amount = parseAmount(message.content.trim());
   if (!amount || amount <= 0) {
-    await channel.send({ content: "Please enter a valid amount (e.g., 100.59, 50k, 2.5m)" });
+    const helpEmbed = new EmbedBuilder()
+      .setColor(0xED4245)
+      .setDescription(
+        `That doesn't look like a valid amount!\n\n` +
+        `**Try formats like:**\n` +
+        `> \`100\` for $100\n` +
+        `> \`50k\` for $50,000\n` +
+        `> \`2.5m\` for $2,500,000`
+      );
+    await channel.send({ embeds: [helpEmbed] });
     return;
   }
 
@@ -181,8 +192,6 @@ export async function handleAmountMessage(message) {
       saleAmount: amount.toFixed(2),
       updatedAt: new Date(),
     }).where(eq(trades.id, trade.id));
-
-    const updatedTrade = { ...trade, saleAmount: amount.toFixed(2) };
 
     const confirmEmbed = createAmountConfirmationEmbed(amount);
     const confirmButtons = createAmountConfirmationButtons(trade.id);
@@ -197,7 +206,7 @@ export async function handleMinecraftUsernameMessage(message) {
   if (message.author.bot) return;
   
   const channel = message.channel;
-  if (!channel.name?.startsWith("ticket-")) return;
+  if (!channel.name?.startsWith("trade-") && !channel.name?.startsWith("ticket-")) return;
 
   const [trade] = await db.select().from(trades).where(
     and(
@@ -245,7 +254,7 @@ async function handleScamModal(interaction) {
 
     if (trade.status === "COMPLETED" || trade.status === "CANCELLED") {
       return interaction.reply({ 
-        content: `Trade already ${trade.status.toLowerCase()}.`, 
+        content: `This trade has already been ${trade.status.toLowerCase()}.`, 
         flags: MessageFlags.Ephemeral 
       });
     }
@@ -263,12 +272,13 @@ async function handleScamModal(interaction) {
 
     const reportEmbed = new EmbedBuilder()
       .setTitle("Dispute Opened")
-      .setColor(0xFF0000)
+      .setColor(0xED4245)
+      .setDescription(`A dispute has been filed and all funds are now frozen.`)
       .addFields(
         { name: "Reported By", value: `<@${userId}>`, inline: true },
-        { name: "Trade", value: `#${tradeId}`, inline: true },
+        { name: "Trade ID", value: `#${tradeId}`, inline: true },
         { name: "Status", value: "Frozen", inline: true },
-        { name: "Sale Amount", value: `$${parseFloat(trade.saleAmount).toFixed(2)}`, inline: true },
+        { name: "Trade Value", value: `$${parseFloat(trade.saleAmount).toFixed(2)}`, inline: true },
         { name: "Sender", value: `<@${trade.sellerDiscordId}>`, inline: true },
         { name: "Receiver", value: `<@${trade.buyerDiscordId}>`, inline: true },
         { name: "Reason", value: reason }
@@ -279,15 +289,18 @@ async function handleScamModal(interaction) {
       new ButtonBuilder()
         .setCustomId(`adj_seller_${tradeId}`)
         .setLabel("Return to Sender")
-        .setStyle(ButtonStyle.Success),
+        .setStyle(ButtonStyle.Success)
+        .setEmoji("↩️"),
       new ButtonBuilder()
         .setCustomId(`adj_buyer_${tradeId}`)
         .setLabel("Release to Receiver")
-        .setStyle(ButtonStyle.Primary),
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji("💸"),
       new ButtonBuilder()
         .setCustomId(`attach_evidence_${tradeId}`)
         .setLabel("Add Evidence")
         .setStyle(ButtonStyle.Secondary)
+        .setEmoji("📎")
     );
 
     let supportMention = "";
@@ -300,7 +313,7 @@ async function handleScamModal(interaction) {
     }
 
     const replyMessage = await interaction.editReply({
-      content: `${supportMention}Dispute opened for Trade #${tradeId}`,
+      content: `${supportMention}A dispute has been opened for Trade #${tradeId}`,
       embeds: [reportEmbed],
       components: [staffButtons],
     });
@@ -328,9 +341,9 @@ async function handleScamModal(interaction) {
     console.error("Scam modal error:", error);
     try {
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content: "An error occurred while opening the dispute." }).catch(() => {});
+        await interaction.editReply({ content: "Something went wrong while opening the dispute." }).catch(() => {});
       } else {
-        await interaction.reply({ content: "An error occurred while opening the dispute.", flags: MessageFlags.Ephemeral }).catch(() => {});
+        await interaction.reply({ content: "Something went wrong while opening the dispute.", flags: MessageFlags.Ephemeral }).catch(() => {});
       }
     } catch (replyError) {
       console.error("Could not send error response:", replyError);
@@ -355,8 +368,8 @@ async function handleEvidenceModal(interaction) {
       .setTitle("Evidence Added")
       .setColor(0x5865F2)
       .addFields(
-        { name: "From", value: `<@${interaction.user.id}>`, inline: true },
-        { name: "Trade", value: `#${tradeId}`, inline: true },
+        { name: "Submitted By", value: `<@${interaction.user.id}>`, inline: true },
+        { name: "Trade ID", value: `#${tradeId}`, inline: true },
         { name: "Evidence", value: evidence.substring(0, 1024) }
       )
       .setTimestamp();
@@ -364,6 +377,6 @@ async function handleEvidenceModal(interaction) {
     await interaction.reply({ embeds: [embed] });
   } catch (error) {
     console.error("Evidence modal error:", error);
-    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: "Something went wrong. Please try again!", flags: MessageFlags.Ephemeral });
   }
 }

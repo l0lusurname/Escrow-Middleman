@@ -80,17 +80,22 @@ async function handleStartMiddleman(interaction) {
   } catch (error) {
     console.error("Start middleman error:", error);
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: "Couldn't start the ticket right now. Please try again in a moment!", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "Something went wrong! Please try again in a moment.", flags: MessageFlags.Ephemeral });
     }
   }
 }
 
 async function handleCloseTicket(interaction) {
   try {
-    await interaction.reply({ content: "Ticket closed.\n\n_This channel will close in 10 seconds..._" });
+    const embed = new EmbedBuilder()
+      .setColor(0xED4245)
+      .setTitle("Ticket Closing")
+      .setDescription("This ticket will close in **10 seconds**...\n\nThanks for using Donut SMP Middleman!");
+
+    await interaction.reply({ embeds: [embed] });
     setTimeout(async () => {
       try {
-        await interaction.channel.delete("Ticket closed");
+        await interaction.channel.delete("Ticket closed by user");
       } catch (e) {
         console.error("Could not delete channel:", e);
       }
@@ -142,13 +147,18 @@ async function handleRoleSelection(interaction) {
 
     const [updatedTrade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
     
-    const embed = createRoleAssignmentEmbed(updatedTrade);
-    const buttons = createRoleAssignmentButtons(tradeId);
-    
+    try {
+      await interaction.message.delete();
+    } catch (e) {}
+
     const confirmEmbed = createConfirmRolesEmbed(updatedTrade);
     const confirmButtons = createConfirmRolesButtons(tradeId);
 
-    await interaction.editReply({ embeds: [embed], components: [buttons] });
+    await interaction.channel.send({ 
+      content: `<@${updatedTrade.sellerDiscordId}> <@${updatedTrade.buyerDiscordId}>`,
+      embeds: [confirmEmbed], 
+      components: [confirmButtons] 
+    });
   } catch (error) {
     console.error("Role selection error:", error);
   }
@@ -166,9 +176,7 @@ async function handleRoleReset(interaction) {
 
     await interaction.deferUpdate();
 
-    const [updatedTrade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
-
-    const embed = createRoleAssignmentEmbed(updatedTrade);
+    const embed = createRoleAssignmentEmbed(trade);
     const buttons = createRoleAssignmentButtons(tradeId);
 
     await interaction.editReply({ embeds: [embed], components: [buttons] });
@@ -189,14 +197,14 @@ async function handleRolesCorrect(interaction) {
 
     const modal = new ModalBuilder()
       .setCustomId(`mc_usernames_modal_${tradeId}`)
-      .setTitle("Minecraft Usernames")
+      .setTitle("Enter Minecraft Usernames")
       .addComponents(
         new ActionRowBuilder().addComponents(
           new TextInputBuilder()
             .setCustomId("sender_mc")
             .setLabel("Sender's Minecraft Username")
             .setStyle(TextInputStyle.Short)
-            .setPlaceholder("Enter sender's in-game name")
+            .setPlaceholder("The person PAYING money")
             .setRequired(true)
             .setMaxLength(16)
         ),
@@ -205,7 +213,7 @@ async function handleRolesCorrect(interaction) {
             .setCustomId("receiver_mc")
             .setLabel("Receiver's Minecraft Username")
             .setStyle(TextInputStyle.Short)
-            .setPlaceholder("Enter receiver's in-game name")
+            .setPlaceholder("The person GETTING money")
             .setRequired(true)
             .setMaxLength(16)
         )
@@ -237,11 +245,6 @@ async function handleRolesIncorrect(interaction) {
     const buttons = createRoleAssignmentButtons(tradeId);
 
     await interaction.channel.send({ embeds: [embed], components: [buttons] });
-    
-    const confirmEmbed = createConfirmRolesEmbed(trade);
-    const confirmButtons = createConfirmRolesButtons(tradeId);
-    
-    await interaction.channel.send({ embeds: [confirmEmbed], components: [confirmButtons] });
   } catch (error) {
     console.error("Roles incorrect error:", error);
   }
@@ -278,7 +281,7 @@ async function handleAmountConfirm(interaction) {
     const awaitingEmbed = createAwaitingPaymentEmbed();
 
     await interaction.channel.send({ 
-      content: `<@${trade.sellerDiscordId}>`,
+      content: `<@${trade.sellerDiscordId}> <@${trade.buyerDiscordId}>`,
       embeds: [summaryEmbed] 
     });
 
@@ -335,7 +338,7 @@ async function handleCopyDetails(interaction) {
     const payCommand = `/pay ${BOT_MC_USERNAME} ${saleAmount}`;
 
     await interaction.reply({
-      content: `Copy this command:\n\`\`\`${payCommand}\`\`\``,
+      content: `**Copy this command and use it in Donut SMP:**\n\`\`\`${payCommand}\`\`\``,
       flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
@@ -398,19 +401,19 @@ async function handleCancelDeal(interaction) {
 
     const userId = interaction.user.id;
     if (trade.sellerDiscordId !== userId && trade.buyerDiscordId !== userId) {
-      return interaction.reply({ content: "Only trade participants can cancel.", flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: "Only trade participants can report an issue.", flags: MessageFlags.Ephemeral });
     }
 
     const modal = new ModalBuilder()
       .setCustomId(`scam_modal_${tradeId}`)
-      .setTitle("Cancel Deal - Reason")
+      .setTitle("Report an Issue")
       .addComponents(
         new ActionRowBuilder().addComponents(
           new TextInputBuilder()
             .setCustomId("reason")
-            .setLabel("Why are you cancelling?")
+            .setLabel("What went wrong?")
             .setStyle(TextInputStyle.Paragraph)
-            .setPlaceholder("Describe the reason...")
+            .setPlaceholder("Describe the issue in detail...")
             .setRequired(true)
             .setMaxLength(1000)
         )
@@ -576,7 +579,7 @@ async function handleAdjudicateButton(interaction, decision) {
   const tradeId = parseInt(interaction.customId.split("_").pop());
 
   if (!interaction.member.permissions.has("Administrator")) {
-    return interaction.reply({ content: "Admin only.", flags: MessageFlags.Ephemeral });
+    return interaction.reply({ content: "Only admins can resolve disputes.", flags: MessageFlags.Ephemeral });
   }
 
   try {
@@ -635,10 +638,10 @@ async function handleAdjudicateButton(interaction, decision) {
 
     const embed = new EmbedBuilder()
       .setTitle("Dispute Resolved")
-      .setColor(0x00FF00)
+      .setColor(0x57F287)
       .setDescription(
-        `Funds released to ${decision === "seller" ? "sender" : "receiver"}.\n\n` +
-        `<@${recipientId}> (${recipientMc}) receives **${amountReleased.toFixed(2)}**.`
+        `**Funds have been released to the ${decision === "seller" ? "sender" : "receiver"}.**\n\n` +
+        `<@${recipientId}> (\`${recipientMc}\`) will receive **$${amountReleased.toFixed(2)}** in Donut SMP.`
       )
       .setFooter({ text: `Resolved by ${interaction.user.tag}` })
       .setTimestamp();
@@ -663,11 +666,11 @@ async function handleAttachEvidence(interaction) {
         new ActionRowBuilder().addComponents(
           new TextInputBuilder()
             .setCustomId("evidence")
-            .setLabel("Evidence")
+            .setLabel("Evidence Details")
             .setStyle(TextInputStyle.Paragraph)
-            .setPlaceholder("Paste screenshots, links, or describe the evidence...")
+            .setPlaceholder("Paste screenshots links, transaction IDs, or describe what happened...")
             .setRequired(true)
-            .setMaxLength(2000)
+            .setMaxLength(1000)
         )
       );
 
