@@ -1,6 +1,6 @@
-# Donut SMP Escrow Bot
+# Donut SMP Middleman Bot
 
-Discord Escrow/Middleman Bot for Minecraft server trades. Provides secure, GUI-first escrow trading with in-game payment verification via Mineflayer, 5% fee automation, and scam dispute workflows.
+Discord Middleman Bot for Donut SMP Minecraft server trades. Provides secure, user-friendly escrow trading with in-game payment verification via Mineflayer, 5% fee automation, and dispute resolution workflows.
 
 ## Overview
 
@@ -121,16 +121,15 @@ Headers required for webhooks:
 
 ## Recent Changes
 
+- Dec 2024: Rebranded from "Cryptocurrency Middleman" to "Donut SMP Middleman" - all references updated
+- Dec 2024: New orange/blue color theme (#F5A623, #5865F2) for better visual identity
+- Dec 2024: Fixed role confirmation flow - now only appears AFTER user selects a role, not immediately
+- Dec 2024: Added emojis to all buttons for better visual clarity
+- Dec 2024: Improved embed formatting with clearer instructions and better UX
+- Dec 2024: Updated channel naming from "ticket-" to "trade-" prefix
 - Dec 2024: Major UX improvements - friendlier language, step-by-step instructions, clearer error messages
-- Dec 2024: Enhanced public embed with "How it works" guide
-- Dec 2024: Improved trade channel welcome with numbered steps
-- Dec 2024: Better modal labels with examples (k/m/b suffixes explained)
-- Dec 2024: Clearer verification and escrow embeds with commands in code blocks
-- Dec 2024: Added emojis to buttons for visual clarity
 - Dec 2024: Added Mineflayer integration for in-game payment detection
 - Dec 2024: Added GUI-first flow with public embed and "Start Middleman" button
 - Dec 2024: Added private trade channels (not threads) for better visibility
 - Dec 2024: Added Copy Pay button with pre-filled /pay commands
-- Dec 2024: Added live embed updates for verification status
-- Dec 2024: Role selection in trade setup to ensure correct buyer/seller assignment
 - Dec 2024: Initial implementation with slash commands and webhook system
