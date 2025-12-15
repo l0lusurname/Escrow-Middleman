@@ -2,9 +2,17 @@ import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, PermissionF
 import { db } from "../db/index.js";
 import { trades, tickets, verifications, botConfig, linkedAccounts } from "../db/schema.js";
 import { eq, and } from "drizzle-orm";
-import { formatAmount, parseAmount, generateVerificationAmount } from "../utils/currencyParser.js";
+import { formatAmount, parseAmount } from "../utils/currencyParser.js";
 import { logAction } from "../utils/auditLog.js";
-import { createVerificationEmbed, createVerificationButtons, deleteLastBotMessage } from "../ui/tradeChannel.js";
+import { 
+  createRoleAssignmentEmbed,
+  createRoleAssignmentButtons,
+  createConfirmRolesEmbed,
+  createConfirmRolesButtons,
+  createAmountConfirmationEmbed,
+  createAmountConfirmationButtons,
+  deleteLastBotMessage 
+} from "../ui/tradeChannel.js";
 import { refreshPublicEmbed } from "../ui/publicEmbed.js";
 
 const BOT_MC_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
@@ -14,97 +22,106 @@ export async function handleModalSubmit(interaction) {
 
   if (customId.startsWith("scam_modal_")) {
     return handleScamModal(interaction);
-  } else if (customId.startsWith("trade_setup_modal_")) {
-    return handleTradeSetupModal(interaction);
   } else if (customId.startsWith("evidence_modal_")) {
     return handleEvidenceModal(interaction);
+  } else if (customId.startsWith("mc_usernames_modal_")) {
+    return handleMcUsernamesModal(interaction);
   }
 }
 
-async function handleTradeSetupModal(interaction) {
-  const shortId = interaction.customId.replace("trade_setup_modal_", "");
+async function handleMcUsernamesModal(interaction) {
+  const tradeId = parseInt(interaction.customId.split("_").pop());
+  const senderMc = interaction.fields.getTextInputValue("sender_mc").trim();
+  const receiverMc = interaction.fields.getTextInputValue("receiver_mc").trim();
 
   try {
-    const yourRole = interaction.fields.getTextInputValue("your_role").trim().toLowerCase();
-    const saleAmountStr = interaction.fields.getTextInputValue("sale_amount");
-    const yourMc = interaction.fields.getTextInputValue("your_mc").trim();
-    const otherMc = interaction.fields.getTextInputValue("other_mc").trim();
-    const notes = interaction.fields.getTextInputValue("notes") || "";
+    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
-    if (yourRole !== "seller" && yourRole !== "buyer") {
-      return interaction.reply({
-        content: "Please type exactly **seller** or **buyer** in the role field. Nothing else will work!",
-        flags: MessageFlags.Ephemeral,
-      });
+    if (!trade) {
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
     }
 
-    const saleAmount = parseAmount(saleAmountStr);
-    if (!saleAmount || saleAmount <= 0) {
-      return interaction.reply({
-        content: "That amount doesn't look right. Try something like: **5000**, **50k**, **2.5m**, or **1b**",
-        flags: MessageFlags.Ephemeral,
-      });
-    }
-
-    if (!yourMc || !otherMc) {
-      return interaction.reply({
-        content: "You need to fill in both Minecraft usernames - yours and your trading partner's.",
-        flags: MessageFlags.Ephemeral,
-      });
-    }
-
-    if (yourMc.toLowerCase() === otherMc.toLowerCase()) {
-      return interaction.reply({
-        content: "The two Minecraft names can't be the same - you need your name AND your trading partner's name.",
-        flags: MessageFlags.Ephemeral,
+    if (!/^[a-zA-Z0-9_]{3,16}$/.test(senderMc) || !/^[a-zA-Z0-9_]{3,16}$/.test(receiverMc)) {
+      return interaction.reply({ 
+        content: "Invalid Minecraft username. Usernames must be 3-16 characters, letters/numbers/underscores only.", 
+        flags: MessageFlags.Ephemeral 
       });
     }
 
     await interaction.deferReply();
 
-    const channel = interaction.channel;
-    const messages = await channel.messages.fetch({ limit: 10 });
-    const mentionedUsers = [];
-    
-    for (const msg of messages.values()) {
-      if (msg.mentions.users.size > 0) {
-        msg.mentions.users.forEach((user) => {
-          if (user.id !== interaction.user.id && user.id !== interaction.client.user.id) {
-            mentionedUsers.push(user);
-          }
-        });
+    await db.update(trades).set({
+      sellerMc: senderMc,
+      buyerMc: receiverMc,
+      status: "ROLES_CONFIRMED",
+      updatedAt: new Date(),
+    }).where(eq(trades.id, tradeId));
+
+    const { createDealAmountEmbed } = await import("../ui/tradeChannel.js");
+    const amountEmbed = createDealAmountEmbed();
+
+    await interaction.editReply({ 
+      content: `Minecraft usernames set!\n**Sender:** ${senderMc}\n**Receiver:** ${receiverMc}`,
+    });
+
+    await interaction.channel.send({ 
+      content: `<@${trade.sellerDiscordId}>`,
+      embeds: [amountEmbed] 
+    });
+
+    await logAction(tradeId, interaction.user.id, "ROLES_CONFIRMED", { senderMc, receiverMc });
+  } catch (error) {
+    console.error("MC usernames modal error:", error);
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content: "An error occurred." }).catch(() => {});
+      } else {
+        await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral }).catch(() => {});
       }
+    } catch (replyError) {
+      console.error("Could not send error response:", replyError);
     }
+  }
+}
 
-    const initiatorId = interaction.user.id;
-    const otherPartyId = mentionedUsers[0]?.id;
+export async function handlePartnerMention(message) {
+  if (message.author.bot) return;
+  
+  const channel = message.channel;
+  if (!channel.name?.startsWith("ticket-")) return;
+  
+  const mentionedUsers = message.mentions.users.filter(u => u.id !== message.author.id && !u.bot);
+  if (mentionedUsers.size === 0) return;
 
-    if (!otherPartyId) {
-      return interaction.editReply({
-        content: "**Oops!** You need to @mention your trading partner in this channel first.\n\nJust type something like `@TheirName let's trade` then click the Setup Trade button again.",
-      });
-    }
+  const otherUser = mentionedUsers.first();
+  
+  const existingTrade = await db.select().from(trades).where(eq(trades.threadId, channel.id)).limit(1);
+  if (existingTrade.length > 0) return;
 
-    const isSeller = yourRole === "seller";
-    const sellerDiscordId = isSeller ? initiatorId : otherPartyId;
-    const buyerDiscordId = isSeller ? otherPartyId : initiatorId;
-    const sellerMc = isSeller ? yourMc : otherMc;
-    const buyerMc = isSeller ? otherMc : yourMc;
+  try {
+    await channel.permissionOverwrites.edit(otherUser.id, {
+      ViewChannel: true,
+      SendMessages: true,
+      ReadMessageHistory: true,
+    });
 
-    const verificationAmountBuyer = generateVerificationAmount();
-    const verificationAmountSeller = generateVerificationAmount();
+    const addedEmbed = new EmbedBuilder()
+      .setColor(0x00FF00)
+      .setDescription(`Successfully added <@${otherUser.id}> to the ticket.`);
+
+    await channel.send({ embeds: [addedEmbed] });
 
     const [newTrade] = await db
       .insert(trades)
       .values({
-        sellerDiscordId,
-        buyerDiscordId,
-        sellerMc,
-        buyerMc,
-        saleAmount: saleAmount.toFixed(2),
-        verificationAmountBuyer: verificationAmountBuyer.toFixed(2),
-        verificationAmountSeller: verificationAmountSeller.toFixed(2),
-        status: "AWAITING_VERIFICATION",
+        sellerDiscordId: message.author.id,
+        buyerDiscordId: otherUser.id,
+        sellerMc: "",
+        buyerMc: "",
+        saleAmount: "0.00",
+        verificationAmountBuyer: "0.00",
+        verificationAmountSeller: "0.00",
+        status: "AWAITING_ROLES",
         threadId: channel.id,
       })
       .returning();
@@ -115,53 +132,101 @@ async function handleTradeSetupModal(interaction) {
       status: "OPEN",
     });
 
-    try {
-      await channel.permissionOverwrites.edit(otherPartyId, {
-        ViewChannel: true,
-        SendMessages: true,
-        ReadMessageHistory: true,
-      });
-    } catch (e) {
-      console.error("Could not add other party to channel:", e);
-    }
+    const roleEmbed = createRoleAssignmentEmbed(newTrade);
+    const roleButtons = createRoleAssignmentButtons(newTrade.id);
 
-    const embed = createVerificationEmbed(newTrade, false, false);
-    const buttons = createVerificationButtons(newTrade.id);
+    await channel.send({ embeds: [roleEmbed], components: [roleButtons] });
 
-    const replyMessage = await interaction.editReply({
-      content: `**Trade #${newTrade.id} is ready!**\n\nNow both of you need to verify your Minecraft accounts:\n\n<@${sellerDiscordId}> (Seller): Go in-game and type \`/pay ${BOT_MC_USERNAME} ${formatAmount(verificationAmountSeller)}\`\n<@${buyerDiscordId}> (Buyer): Go in-game and type \`/pay ${BOT_MC_USERNAME} ${formatAmount(verificationAmountBuyer)}\`\n\n_These are small verification amounts to prove you own the accounts._`,
-      embeds: [embed],
-      components: [buttons],
+    const confirmEmbed = createConfirmRolesEmbed(newTrade);
+    const confirmButtons = createConfirmRolesButtons(newTrade.id);
+
+    await channel.send({ embeds: [confirmEmbed], components: [confirmButtons] });
+
+    await logAction(newTrade.id, message.author.id, "TRADE_CREATED", {
+      sellerDiscordId: message.author.id,
+      buyerDiscordId: otherUser.id,
     });
 
-    // Delete old bot messages AFTER our reply is sent, excluding our new message
-    await deleteLastBotMessage(channel, replyMessage.id);
-
-    if (notes) {
-      await channel.send({ content: `**Notes:** ${notes}` });
-    }
-
-    await logAction(newTrade.id, initiatorId, "TRADE_CREATED", {
-      sellerDiscordId,
-      buyerDiscordId,
-      sellerMc,
-      buyerMc,
-      saleAmount,
-    });
-
-    await refreshPublicEmbed(interaction.client, interaction.guild.id);
   } catch (error) {
-    console.error("Trade setup modal error:", error);
-    try {
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ content: "An error occurred while setting up the trade." }).catch(() => {});
-      } else {
-        await interaction.reply({ content: "An error occurred while setting up the trade.", flags: MessageFlags.Ephemeral }).catch(() => {});
-      }
-    } catch (replyError) {
-      // Interaction expired, nothing we can do
-      console.error("Could not send error response:", replyError);
-    }
+    console.error("Error handling partner mention:", error);
+    await channel.send({ content: "Failed to add user to ticket. Please try again." });
+  }
+}
+
+export async function handleAmountMessage(message) {
+  if (message.author.bot) return;
+  
+  const channel = message.channel;
+  if (!channel.name?.startsWith("ticket-")) return;
+
+  const [trade] = await db.select().from(trades).where(
+    and(
+      eq(trades.threadId, channel.id),
+      eq(trades.status, "ROLES_CONFIRMED")
+    )
+  ).limit(1);
+
+  if (!trade) return;
+
+  if (message.author.id !== trade.sellerDiscordId) return;
+
+  const amount = parseAmount(message.content.trim());
+  if (!amount || amount <= 0) {
+    await channel.send({ content: "Please enter a valid amount (e.g., 100.59, 50k, 2.5m)" });
+    return;
+  }
+
+  try {
+    await db.update(trades).set({
+      saleAmount: amount.toFixed(2),
+      updatedAt: new Date(),
+    }).where(eq(trades.id, trade.id));
+
+    const updatedTrade = { ...trade, saleAmount: amount.toFixed(2) };
+
+    const confirmEmbed = createAmountConfirmationEmbed(amount);
+    const confirmButtons = createAmountConfirmationButtons(trade.id);
+
+    await channel.send({ embeds: [confirmEmbed], components: [confirmButtons] });
+  } catch (error) {
+    console.error("Error handling amount message:", error);
+  }
+}
+
+export async function handleMinecraftUsernameMessage(message) {
+  if (message.author.bot) return;
+  
+  const channel = message.channel;
+  if (!channel.name?.startsWith("ticket-")) return;
+
+  const [trade] = await db.select().from(trades).where(
+    and(
+      eq(trades.threadId, channel.id),
+      eq(trades.status, "AWAITING_ROLES")
+    )
+  ).limit(1);
+
+  if (!trade) return;
+
+  const username = message.content.trim();
+  if (!/^[a-zA-Z0-9_]{3,16}$/.test(username)) return;
+
+  const userId = message.author.id;
+  const updateData = { updatedAt: new Date() };
+
+  if (userId === trade.sellerDiscordId && !trade.sellerMc) {
+    updateData.sellerMc = username;
+  } else if (userId === trade.buyerDiscordId && !trade.buyerMc) {
+    updateData.buyerMc = username;
+  } else {
+    return;
+  }
+
+  try {
+    await db.update(trades).set(updateData).where(eq(trades.id, trade.id));
+    await message.react("✅");
+  } catch (error) {
+    console.error("Error handling Minecraft username:", error);
   }
 }
 
@@ -203,9 +268,9 @@ async function handleScamModal(interaction) {
         { name: "Reported By", value: `<@${userId}>`, inline: true },
         { name: "Trade", value: `#${tradeId}`, inline: true },
         { name: "Status", value: "Frozen", inline: true },
-        { name: "Sale Amount", value: formatAmount(trade.saleAmount), inline: true },
-        { name: "Seller", value: `<@${trade.sellerDiscordId}>`, inline: true },
-        { name: "Buyer", value: `<@${trade.buyerDiscordId}>`, inline: true },
+        { name: "Sale Amount", value: `$${parseFloat(trade.saleAmount).toFixed(2)}`, inline: true },
+        { name: "Sender", value: `<@${trade.sellerDiscordId}>`, inline: true },
+        { name: "Receiver", value: `<@${trade.buyerDiscordId}>`, inline: true },
         { name: "Reason", value: reason }
       )
       .setTimestamp();
@@ -213,11 +278,11 @@ async function handleScamModal(interaction) {
     const staffButtons = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`adj_seller_${tradeId}`)
-        .setLabel("Release to Seller")
+        .setLabel("Return to Sender")
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`adj_buyer_${tradeId}`)
-        .setLabel("Refund Buyer")
+        .setLabel("Release to Receiver")
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId(`attach_evidence_${tradeId}`)
@@ -240,7 +305,6 @@ async function handleScamModal(interaction) {
       components: [staffButtons],
     });
 
-    // Delete old bot messages AFTER our reply, excluding our new message
     await deleteLastBotMessage(interaction.channel, replyMessage.id);
 
     if (config?.staffChannelId) {

@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, REST, Routes, Events } from "discord.js";
+import { Client, GatewayIntentBits, REST, Routes, Events, Partials } from "discord.js";
 import express from "express";
 import { db } from "./db/index.js";
 import { data as mmCommand, execute as mmExecute } from "./commands/link.js";
@@ -18,7 +18,7 @@ import {
   handlePay,
 } from "./commands/handlers/adminCommands.js";
 import { handleButtonInteraction } from "./events/buttonHandler.js";
-import { handleModalSubmit } from "./events/modalHandler.js";
+import { handleModalSubmit, handlePartnerMention, handleAmountMessage } from "./events/modalHandler.js";
 import { createWebhookRouter } from "./webhook/paymentWebhook.js";
 import { minecraftBot } from "./minecraft/mineflayer.js";
 import { createPaymentHandler } from "./minecraft/paymentHandler.js";
@@ -42,7 +42,10 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
   ],
+  partials: [Partials.Message, Partials.Channel],
 });
 
 const app = express();
@@ -87,6 +90,15 @@ client.once(Events.ClientReady, async (readyClient) => {
     minecraftBot.connect();
   } else {
     console.log("Mineflayer integration disabled. Set ENABLE_MINEFLAYER=true to enable.");
+  }
+});
+
+client.on(Events.MessageCreate, async (message) => {
+  try {
+    await handlePartnerMention(message);
+    await handleAmountMessage(message);
+  } catch (error) {
+    console.error("Message handler error:", error);
   }
 });
 
@@ -174,7 +186,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 async function start() {
   try {
-    console.log("Starting Donut SMP Escrow Bot...");
+    console.log("Starting Middleman Bot...");
 
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`Webhook server running on port ${PORT}`);

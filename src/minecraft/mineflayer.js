@@ -4,7 +4,7 @@ import { parseAmount } from "../utils/currencyParser.js";
 
 const MINECRAFT_HOST = process.env.MINECRAFT_HOST || "donutsmp.net";
 const MINECRAFT_PORT = parseInt(process.env.MINECRAFT_PORT) || 25565;
-const MINECRAFT_VERSION = process.env.MINECRAFT_VERSION || "1.21.1";
+const MINECRAFT_VERSION = process.env.MINECRAFT_VERSION || false;
 const MINECRAFT_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
 const MINECRAFT_AUTH = process.env.MINECRAFT_AUTH || "microsoft";
 
@@ -14,11 +14,30 @@ class MinecraftBot extends EventEmitter {
     this.bot = null;
     this.connected = false;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
-    this.reconnectDelay = 5000;
+    this.reconnectTimeout = null;
+    this.teamHomeInterval = null;
+    this.keepAliveInterval = null;
+  }
+
+  clearIntervals() {
+    if (this.teamHomeInterval) {
+      clearInterval(this.teamHomeInterval);
+      this.teamHomeInterval = null;
+    }
+    if (this.keepAliveInterval) {
+      clearInterval(this.keepAliveInterval);
+      this.keepAliveInterval = null;
+    }
   }
 
   connect() {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+
+    this.clearIntervals();
+
     console.log(`Connecting to Minecraft server ${MINECRAFT_HOST}:${MINECRAFT_PORT} as ${MINECRAFT_USERNAME}...`);
 
     try {
@@ -26,12 +45,15 @@ class MinecraftBot extends EventEmitter {
         host: MINECRAFT_HOST,
         port: MINECRAFT_PORT,
         username: MINECRAFT_USERNAME,
-        version: MINECRAFT_VERSION,
         auth: MINECRAFT_AUTH,
+        version: MINECRAFT_VERSION,
+        connectTimeout: 60000,
+        checkTimeoutInterval: 30000,
         hideErrors: false,
+        keepAlive: true,
+        validateChannelProtocol: false,
       };
 
-      // Add auth callback for Microsoft authentication
       if (MINECRAFT_AUTH === "microsoft") {
         botOptions.onMsaCode = (data) => {
           console.log("\n========== MICROSOFT AUTHENTICATION ==========");
@@ -51,7 +73,7 @@ class MinecraftBot extends EventEmitter {
       this.bot = mineflayer.createBot(botOptions);
       this.setupEventListeners();
     } catch (error) {
-      console.error("Failed to create Minecraft bot:", error);
+      console.error("Failed to create Minecraft bot:", error.message);
       this.scheduleReconnect();
     }
   }
@@ -59,6 +81,7 @@ class MinecraftBot extends EventEmitter {
   setupEventListeners() {
     this.bot.on("login", () => {
       console.log(`Minecraft bot logged in as ${this.bot.username}`);
+      console.log(`Protocol version: ${this.bot.version}`);
       this.connected = true;
       this.reconnectAttempts = 0;
       this.emit("connected");
@@ -67,34 +90,70 @@ class MinecraftBot extends EventEmitter {
     this.bot.on("spawn", () => {
       console.log("Minecraft bot spawned in world");
       this.emit("spawned");
+
+      setTimeout(() => {
+        if (this.bot && this.bot.entity) {
+          console.log("Executing /team home...");
+          this.bot.chat("/team home");
+        }
+      }, 2000);
+
+      this.teamHomeInterval = setInterval(() => {
+        if (this.bot && this.bot.entity) {
+          console.log("Executing /team home (scheduled)...");
+          this.bot.chat("/team home");
+        }
+      }, 1000 * 60 * 10);
+
+      this.keepAliveInterval = setInterval(() => {
+        if (this.bot && this.bot.entity && this.bot.entity.position) {
+          const pos = this.bot.entity.position;
+          console.log(`Still connected at ${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)}`);
+        }
+      }, 1000 * 60 * 5);
     });
 
-    // Only use one event handler to avoid duplicate processing
     this.bot.on("message", (jsonMsg, position) => {
-      if (position !== "system") return; // Only process system messages (payment notifications)
+      if (position !== "system") return;
       const message = jsonMsg.toString();
       console.log(`[MC Chat] ${message}`);
       this.handleChatMessage(message);
     });
 
     this.bot.on("kicked", (reason) => {
-      console.error("Minecraft bot was kicked:", reason);
+      console.warn("Minecraft bot was kicked:", reason);
       this.connected = false;
+      this.clearIntervals();
       this.emit("kicked", reason);
       this.scheduleReconnect();
     });
 
-    this.bot.on("end", () => {
-      console.log("Minecraft bot disconnected");
+    this.bot.on("end", (reason) => {
+      console.log("Minecraft bot disconnected:", reason);
       this.connected = false;
+      this.clearIntervals();
       this.emit("disconnected");
       this.scheduleReconnect();
     });
 
     this.bot.on("error", (err) => {
-      console.error("Minecraft bot error:", err);
+      console.error("Minecraft bot error:", err.message);
       this.emit("error", err);
+
+      if (err.message.includes("PartialReadError")) {
+        console.log("Hint: Try setting MINECRAFT_VERSION env variable (e.g., '1.20.1')");
+      }
+
+      if (err.message.includes("ECONNREFUSED") || err.message.includes("ETIMEDOUT")) {
+        console.log("Connection issue detected, will retry...");
+      }
     });
+
+    if (this.bot._client) {
+      this.bot._client.on("error", (err) => {
+        console.error("Client error:", err.message);
+      });
+    }
   }
 
   extractText(component) {
@@ -127,8 +186,6 @@ class MinecraftBot extends EventEmitter {
   }
 
   handleChatMessage(message) {
-    console.log(`[MC Chat] ${message}`);
-
     const cleanMessage = this.normalizeMessage(message);
     console.log(`[MC Chat Clean] ${cleanMessage}`);
 
@@ -164,22 +221,21 @@ class MinecraftBot extends EventEmitter {
   }
 
   scheduleReconnect() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error("Max reconnect attempts reached. Stopping Minecraft bot.");
-      return;
-    }
-
     this.reconnectAttempts++;
-    const delay = this.reconnectDelay * this.reconnectAttempts;
-
-    console.log(`Attempting to reconnect in ${delay / 1000} seconds (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-
-    setTimeout(() => {
+    
+    const delay = Math.min(10000 * this.reconnectAttempts, 60000);
+    
+    console.log(`Reconnecting in ${delay / 1000}s... (attempt ${this.reconnectAttempts})`);
+    
+    this.reconnectTimeout = setTimeout(() => {
       this.connect();
     }, delay);
   }
 
   disconnect() {
+    console.log("Shutting down Minecraft bot gracefully...");
+    this.clearIntervals();
+    if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
     if (this.bot) {
       this.bot.quit();
       this.bot = null;
@@ -201,5 +257,27 @@ class MinecraftBot extends EventEmitter {
     }
   }
 }
+
+process.on('SIGINT', () => {
+  console.log('\nReceived SIGINT, shutting down...');
+  minecraftBot.disconnect();
+  setTimeout(() => process.exit(0), 1000);
+});
+
+process.on('SIGTERM', () => {
+  console.log('\nReceived SIGTERM, shutting down...');
+  minecraftBot.disconnect();
+  setTimeout(() => process.exit(0), 1000);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err.message);
+  console.log('Attempting to recover...');
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled rejection:', err.message || err);
+  console.log('Attempting to recover...');
+});
 
 export const minecraftBot = new MinecraftBot();

@@ -8,23 +8,23 @@ const FEE_PERCENT = parseFloat(process.env.FEE_PERCENT) || 5.0;
 
 export function createPublicEmbed() {
   const embed = new EmbedBuilder()
-    .setTitle("Secure Middleman Trading")
-    .setColor(0x5865F2)
+    .setTitle("Cryptocurrency Middleman System")
+    .setColor(0x2F3136)
     .setDescription(
-      `Trade safely with our escrow service! We hold the payment until both sides are happy.\n\n` +
+      `Trade safely with our automated middleman service!\n\n` +
       `**How it works:**\n` +
-      `1. Click the button below to start\n` +
-      `2. Tag your trading partner in the private channel\n` +
-      `3. Both of you verify your identities with a small payment\n` +
-      `4. Buyer deposits the full amount\n` +
-      `5. Seller delivers the goods\n` +
-      `6. Buyer confirms, seller gets paid!\n\n` +
-      `Your money is protected the entire time.`
+      `1. Click the button below to create a ticket\n` +
+      `2. Tag your trading partner in the ticket\n` +
+      `3. Select your roles (Sender/Receiver)\n` +
+      `4. Sender deposits the payment\n` +
+      `5. Receiver delivers the goods\n` +
+      `6. Sender releases funds to complete the deal\n\n` +
+      `Your funds are protected the entire time.`
     )
     .addFields(
       {
         name: "Service Fee",
-        value: `**${FEE_PERCENT}%** of sale\n_(taken from seller)_`,
+        value: `**${FEE_PERCENT}%** of deal\n_(taken from receiver)_`,
         inline: true,
       },
       {
@@ -38,7 +38,7 @@ export function createPublicEmbed() {
         inline: true,
       }
     )
-    .setFooter({ text: "Donut SMP • Safe & Secure Trading" })
+    .setFooter({ text: "Safe & Secure Middleman" })
     .setTimestamp();
 
   return embed;
@@ -48,9 +48,8 @@ export function createStartButton() {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("start_middleman")
-      .setLabel("Start New Trade")
+      .setLabel("Create Ticket")
       .setStyle(ButtonStyle.Success)
-      .setEmoji("🛡️")
   );
 }
 
@@ -135,9 +134,9 @@ export async function getDailyStats(guildId) {
       .from(trades)
       .where(
         or(
-          eq(trades.status, "CREATED"),
-          eq(trades.status, "AWAITING_VERIFICATION"),
-          eq(trades.status, "VERIFIED"),
+          eq(trades.status, "AWAITING_ROLES"),
+          eq(trades.status, "ROLES_CONFIRMED"),
+          eq(trades.status, "AWAITING_PAYMENT"),
           eq(trades.status, "IN_ESCROW")
         )
       );

@@ -2,58 +2,75 @@ import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilde
 import { db } from "../db/index.js";
 import { trades, tickets, botConfig } from "../db/schema.js";
 import { eq } from "drizzle-orm";
-import { formatAmount } from "../utils/currencyParser.js";
+import { formatAmount, parseAmount } from "../utils/currencyParser.js";
 import { logAction } from "../utils/auditLog.js";
 import { 
-  createTradeChannel, 
-  createTradeSetupModal, 
-  createVerificationEmbed, 
-  createVerificationButtons,
-  createEscrowEmbed,
-  createEscrowButtons,
+  createTradeChannel,
+  createRoleAssignmentEmbed,
+  createRoleAssignmentButtons,
+  createConfirmRolesEmbed,
+  createConfirmRolesButtons,
+  createDealAmountEmbed,
+  createAmountConfirmationEmbed,
+  createAmountConfirmationButtons,
+  createDealSummaryEmbed,
+  createPaymentInvoiceEmbed,
+  createCopyDetailsButton,
+  createAwaitingPaymentEmbed,
+  createProceedWithDealEmbed,
+  createReleaseButtons,
+  createReleaseConfirmationEmbed,
+  createReleaseConfirmButtons,
+  createSupportNotificationEmbed,
   createCompletedEmbed,
   createDisputeEmbed,
   createDisputeButtons,
+  createEscrowButtons,
   deleteLastBotMessage
 } from "../ui/tradeChannel.js";
 import { refreshPublicEmbed } from "../ui/publicEmbed.js";
 import { minecraftBot } from "../minecraft/mineflayer.js";
 
 const BOT_MC_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
+const FEE_PERCENT = parseFloat(process.env.FEE_PERCENT) || 5.0;
 
 export async function handleButtonInteraction(interaction) {
   const customId = interaction.customId;
 
   if (customId === "start_middleman") {
     return handleStartMiddleman(interaction);
-  } else if (customId.startsWith("setup_trade_")) {
-    return handleSetupTrade(interaction);
-  } else if (customId.startsWith("cancel_trade_") && !customId.includes("_db_")) {
-    return handleCancelChannel(interaction);
-  } else if (customId.startsWith("copy_pay_seller_")) {
-    return handleCopyPay(interaction, "seller");
-  } else if (customId.startsWith("copy_pay_buyer_")) {
-    return handleCopyPay(interaction, "buyer");
-  } else if (customId.startsWith("deposit_escrow_")) {
-    return handleDepositEscrow(interaction);
-  } else if (customId.startsWith("confirm_delivered_")) {
-    return handleConfirmDelivered(interaction);
-  } else if (customId.startsWith("mark_scammed_")) {
-    return handleMarkScammedButton(interaction);
-  } else if (customId.startsWith("cancel_confirm_seller_")) {
-    return handleCancelConfirm(interaction, "seller");
-  } else if (customId.startsWith("cancel_confirm_buyer_")) {
-    return handleCancelConfirm(interaction, "buyer");
-  } else if (customId.startsWith("request_cancel_") || customId.startsWith("cancel_trade_db_")) {
-    return handleShowCancelButtons(interaction);
+  } else if (customId.startsWith("close_ticket_")) {
+    return handleCloseTicket(interaction);
+  } else if (customId.startsWith("role_sending_") || customId.startsWith("role_receiving_")) {
+    return handleRoleSelection(interaction);
+  } else if (customId.startsWith("role_reset_")) {
+    return handleRoleReset(interaction);
+  } else if (customId.startsWith("roles_correct_")) {
+    return handleRolesCorrect(interaction);
+  } else if (customId.startsWith("roles_incorrect_")) {
+    return handleRolesIncorrect(interaction);
+  } else if (customId.startsWith("amount_confirm_")) {
+    return handleAmountConfirm(interaction);
+  } else if (customId.startsWith("amount_incorrect_")) {
+    return handleAmountIncorrect(interaction);
+  } else if (customId.startsWith("copy_details_")) {
+    return handleCopyDetails(interaction);
+  } else if (customId.startsWith("release_funds_")) {
+    return handleReleaseFunds(interaction);
+  } else if (customId.startsWith("cancel_deal_")) {
+    return handleCancelDeal(interaction);
+  } else if (customId.startsWith("confirm_release_")) {
+    return handleConfirmRelease(interaction);
+  } else if (customId.startsWith("back_release_")) {
+    return handleBackRelease(interaction);
   } else if (customId.startsWith("adj_seller_")) {
     return handleAdjudicateButton(interaction, "seller");
   } else if (customId.startsWith("adj_buyer_")) {
     return handleAdjudicateButton(interaction, "buyer");
-  } else if (customId.startsWith("close_dispute_")) {
-    return handleCloseDispute(interaction);
   } else if (customId.startsWith("attach_evidence_")) {
     return handleAttachEvidence(interaction);
+  } else if (customId.startsWith("mark_scammed_")) {
+    return handleMarkScammedButton(interaction);
   }
 }
 
@@ -63,123 +80,376 @@ async function handleStartMiddleman(interaction) {
   } catch (error) {
     console.error("Start middleman error:", error);
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: "Couldn't start the trade right now. Please try again in a moment!", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "Couldn't start the ticket right now. Please try again in a moment!", flags: MessageFlags.Ephemeral });
     }
   }
 }
 
-async function handleSetupTrade(interaction) {
-  const shortId = interaction.customId.split("_").slice(2).join("_");
+async function handleCloseTicket(interaction) {
   try {
-    const modal = createTradeSetupModal(shortId);
-    await interaction.showModal(modal);
-  } catch (error) {
-    console.error("Setup trade error:", error);
-    await interaction.reply({ content: "Couldn't open the setup form. Please try clicking the button again!", flags: MessageFlags.Ephemeral });
-  }
-}
-
-async function handleCancelChannel(interaction) {
-  try {
-    await interaction.reply({ content: "No problem! This trade has been cancelled.\n\n_This channel will close in 10 seconds..._" });
+    await interaction.reply({ content: "Ticket closed.\n\n_This channel will close in 10 seconds..._" });
     setTimeout(async () => {
       try {
-        await interaction.channel.delete("Trade cancelled");
+        await interaction.channel.delete("Ticket closed");
       } catch (e) {
         console.error("Could not delete channel:", e);
       }
     }, 10000);
   } catch (error) {
-    console.error("Cancel channel error:", error);
+    console.error("Close ticket error:", error);
   }
 }
 
-async function handleCopyPay(interaction, party) {
-  const tradeId = parseInt(interaction.customId.split("_").pop());
+async function handleRoleSelection(interaction) {
+  const parts = interaction.customId.split("_");
+  const role = parts[1];
+  const tradeId = parseInt(parts[2]);
 
   try {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.editReply({ content: "Trade not found." });
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
     }
 
-    const amount = party === "seller"
-      ? parseFloat(trade.verificationAmountSeller)
-      : parseFloat(trade.verificationAmountBuyer);
+    const userId = interaction.user.id;
+    const user1 = trade.sellerDiscordId;
+    const user2 = trade.buyerDiscordId;
+    
+    if (userId !== user1 && userId !== user2) {
+      return interaction.reply({ content: "Only trade participants can select roles.", flags: MessageFlags.Ephemeral });
+    }
 
-    const payCommand = `/pay ${BOT_MC_USERNAME} ${amount.toFixed(2)}`;
+    await interaction.deferUpdate();
 
-    await interaction.editReply({ 
-      content: `Copy this command:\n\`\`\`${payCommand}\`\`\`` 
+    const clickedSending = role === "sending";
+    
+    let newSender, newReceiver;
+    
+    if (clickedSending) {
+      newSender = userId;
+      newReceiver = userId === user1 ? user2 : user1;
+    } else {
+      newReceiver = userId;
+      newSender = userId === user1 ? user2 : user1;
+    }
+
+    await db.update(trades).set({
+      sellerDiscordId: newSender,
+      buyerDiscordId: newReceiver,
+      updatedAt: new Date(),
+    }).where(eq(trades.id, tradeId));
+
+    const [updatedTrade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+    
+    const embed = createRoleAssignmentEmbed(updatedTrade);
+    const buttons = createRoleAssignmentButtons(tradeId);
+    
+    const confirmEmbed = createConfirmRolesEmbed(updatedTrade);
+    const confirmButtons = createConfirmRolesButtons(tradeId);
+
+    await interaction.editReply({ embeds: [embed], components: [buttons] });
+  } catch (error) {
+    console.error("Role selection error:", error);
+  }
+}
+
+async function handleRoleReset(interaction) {
+  const tradeId = parseInt(interaction.customId.split("_").pop());
+
+  try {
+    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    if (!trade) {
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.deferUpdate();
+
+    const [updatedTrade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    const embed = createRoleAssignmentEmbed(updatedTrade);
+    const buttons = createRoleAssignmentButtons(tradeId);
+
+    await interaction.editReply({ embeds: [embed], components: [buttons] });
+  } catch (error) {
+    console.error("Role reset error:", error);
+  }
+}
+
+async function handleRolesCorrect(interaction) {
+  const tradeId = parseInt(interaction.customId.split("_").pop());
+
+  try {
+    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    if (!trade) {
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+    }
+
+    const modal = new ModalBuilder()
+      .setCustomId(`mc_usernames_modal_${tradeId}`)
+      .setTitle("Minecraft Usernames")
+      .addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId("sender_mc")
+            .setLabel("Sender's Minecraft Username")
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder("Enter sender's in-game name")
+            .setRequired(true)
+            .setMaxLength(16)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId("receiver_mc")
+            .setLabel("Receiver's Minecraft Username")
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder("Enter receiver's in-game name")
+            .setRequired(true)
+            .setMaxLength(16)
+        )
+      );
+
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error("Roles correct error:", error);
+  }
+}
+
+async function handleRolesIncorrect(interaction) {
+  const tradeId = parseInt(interaction.customId.split("_").pop());
+
+  try {
+    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    if (!trade) {
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.deferUpdate();
+
+    try {
+      await interaction.message.delete();
+    } catch (e) {}
+
+    const embed = createRoleAssignmentEmbed(trade);
+    const buttons = createRoleAssignmentButtons(tradeId);
+
+    await interaction.channel.send({ embeds: [embed], components: [buttons] });
+    
+    const confirmEmbed = createConfirmRolesEmbed(trade);
+    const confirmButtons = createConfirmRolesButtons(tradeId);
+    
+    await interaction.channel.send({ embeds: [confirmEmbed], components: [confirmButtons] });
+  } catch (error) {
+    console.error("Roles incorrect error:", error);
+  }
+}
+
+async function handleAmountConfirm(interaction) {
+  const tradeId = parseInt(interaction.customId.split("_").pop());
+
+  try {
+    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    if (!trade) {
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+    }
+
+    if (trade.sellerDiscordId !== interaction.user.id) {
+      return interaction.reply({ content: "Only the sender can confirm the amount.", flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.deferUpdate();
+
+    await db.update(trades).set({
+      status: "AWAITING_PAYMENT",
+      updatedAt: new Date(),
+    }).where(eq(trades.id, tradeId));
+
+    try {
+      await interaction.message.delete();
+    } catch (e) {}
+
+    const summaryEmbed = createDealSummaryEmbed(trade);
+    const invoiceEmbed = createPaymentInvoiceEmbed(trade);
+    const copyButton = createCopyDetailsButton(tradeId);
+    const awaitingEmbed = createAwaitingPaymentEmbed();
+
+    await interaction.channel.send({ 
+      content: `<@${trade.sellerDiscordId}>`,
+      embeds: [summaryEmbed] 
+    });
+
+    await interaction.channel.send({ 
+      embeds: [invoiceEmbed],
+      components: [copyButton]
+    });
+
+    await interaction.channel.send({ embeds: [awaitingEmbed] });
+
+    await logAction(tradeId, interaction.user.id, "AMOUNT_CONFIRMED", { amount: trade.saleAmount });
+  } catch (error) {
+    console.error("Amount confirm error:", error);
+  }
+}
+
+async function handleAmountIncorrect(interaction) {
+  const tradeId = parseInt(interaction.customId.split("_").pop());
+
+  try {
+    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    if (!trade) {
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.deferUpdate();
+
+    try {
+      await interaction.message.delete();
+    } catch (e) {}
+
+    const amountEmbed = createDealAmountEmbed();
+    await interaction.channel.send({ 
+      content: `<@${trade.sellerDiscordId}>`,
+      embeds: [amountEmbed] 
     });
   } catch (error) {
-    console.error("Copy pay error:", error);
-    await interaction.editReply({ content: "An error occurred." });
+    console.error("Amount incorrect error:", error);
   }
 }
 
-async function handleDepositEscrow(interaction) {
+async function handleCopyDetails(interaction) {
   const tradeId = parseInt(interaction.customId.split("_").pop());
 
   try {
-    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.editReply({ content: "Hmm, couldn't find that trade. It may have been closed." });
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
     }
 
-    if (trade.buyerDiscordId !== interaction.user.id) {
-      return interaction.editReply({ content: "Only the **buyer** can deposit to escrow. If you're the seller, just wait for the buyer to deposit!" });
-    }
+    const saleAmount = parseFloat(trade.saleAmount).toFixed(2);
+    const payCommand = `/pay ${BOT_MC_USERNAME} ${saleAmount}`;
 
-    if (!trade.buyerVerified || !trade.sellerVerified) {
-      return interaction.editReply({ content: "Hold on! Both you and the other person need to verify first. Check the instructions above." });
-    }
-
-    const saleAmount = parseFloat(trade.saleAmount);
-    const payCommand = `/pay ${BOT_MC_USERNAME} ${saleAmount.toFixed(2)}`;
-
-    await interaction.editReply({ 
-      content: `**Ready to deposit!**\n\nGo in-game and type:\n\`\`\`${payCommand}\`\`\`\nOnce you pay, the bot will automatically detect it and update this trade.` 
+    await interaction.reply({
+      content: `Copy this command:\n\`\`\`${payCommand}\`\`\``,
+      flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
-    console.error("Deposit escrow error:", error);
-    await interaction.editReply({ content: "An error occurred." });
+    console.error("Copy details error:", error);
+    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
   }
 }
 
-async function handleConfirmDelivered(interaction) {
+async function handleReleaseFunds(interaction) {
   const tradeId = parseInt(interaction.customId.split("_").pop());
 
   try {
     const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
 
     if (!trade) {
-      return interaction.reply({ content: "Couldn't find that trade. It may have been closed already.", flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
     }
 
-    if (trade.buyerDiscordId !== interaction.user.id) {
-      return interaction.reply({ content: "Only the **buyer** can confirm delivery. Seller, wait for the buyer to confirm they got everything!", flags: MessageFlags.Ephemeral });
+    if (trade.sellerDiscordId !== interaction.user.id) {
+      return interaction.reply({ content: "Only the sender can release funds.", flags: MessageFlags.Ephemeral });
     }
 
     if (trade.status !== "IN_ESCROW") {
-      return interaction.reply({ content: "The payment needs to be deposited first before you can confirm delivery.", flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: "Payment must be deposited first.", flags: MessageFlags.Ephemeral });
     }
 
     if (trade.frozen) {
-      return interaction.reply({ content: "This trade is currently frozen due to a dispute. Please wait for staff to resolve it.", flags: MessageFlags.Ephemeral });
+      return interaction.reply({ content: "This trade is frozen due to a dispute.", flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.deferUpdate();
+
+    const supportEmbed = createSupportNotificationEmbed();
+    const releaseEmbed = createReleaseConfirmationEmbed(trade);
+    const releaseButtons = createReleaseConfirmButtons(tradeId);
+
+    await interaction.channel.send({ embeds: [supportEmbed] });
+    await interaction.channel.send({ 
+      content: `<@${trade.sellerDiscordId}>`,
+      embeds: [releaseEmbed], 
+      components: [releaseButtons] 
+    });
+  } catch (error) {
+    console.error("Release funds error:", error);
+    if (!interaction.replied) {
+      await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+    }
+  }
+}
+
+async function handleCancelDeal(interaction) {
+  const tradeId = parseInt(interaction.customId.split("_").pop());
+
+  try {
+    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    if (!trade) {
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+    }
+
+    const userId = interaction.user.id;
+    if (trade.sellerDiscordId !== userId && trade.buyerDiscordId !== userId) {
+      return interaction.reply({ content: "Only trade participants can cancel.", flags: MessageFlags.Ephemeral });
+    }
+
+    const modal = new ModalBuilder()
+      .setCustomId(`scam_modal_${tradeId}`)
+      .setTitle("Cancel Deal - Reason")
+      .addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId("reason")
+            .setLabel("Why are you cancelling?")
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder("Describe the reason...")
+            .setRequired(true)
+            .setMaxLength(1000)
+        )
+      );
+
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error("Cancel deal error:", error);
+    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+  }
+}
+
+async function handleConfirmRelease(interaction) {
+  const tradeId = parseInt(interaction.customId.split("_").pop());
+
+  try {
+    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    if (!trade) {
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+    }
+
+    if (trade.sellerDiscordId !== interaction.user.id) {
+      return interaction.reply({ content: "Only the sender can confirm release.", flags: MessageFlags.Ephemeral });
+    }
+
+    if (trade.status !== "IN_ESCROW") {
+      return interaction.reply({ content: "Payment must be in escrow first.", flags: MessageFlags.Ephemeral });
+    }
+
+    if (trade.frozen) {
+      return interaction.reply({ content: "This trade is frozen due to a dispute.", flags: MessageFlags.Ephemeral });
     }
 
     await interaction.deferUpdate();
 
     const saleAmount = parseFloat(trade.saleAmount);
-    const feeAmount = saleAmount * 0.05;
-    const sellerReceives = saleAmount - feeAmount;
+    const feeAmount = saleAmount * (FEE_PERCENT / 100);
+    const receiverGets = saleAmount - feeAmount;
 
     await db.update(trades).set({
       status: "COMPLETED",
@@ -193,22 +463,21 @@ async function handleConfirmDelivered(interaction) {
       updatedAt: new Date(),
     }).where(eq(tickets.tradeId, tradeId));
 
-    // Send payment to seller in Minecraft
     if (minecraftBot.isConnected()) {
-      const payCommand = `/pay ${trade.sellerMc} ${sellerReceives.toFixed(2)}`;
+      const payCommand = `/pay ${trade.buyerMc} ${receiverGets.toFixed(2)}`;
       minecraftBot.sendChat(payCommand);
       console.log(`Sent Minecraft payment: ${payCommand}`);
     } else {
       console.error("Minecraft bot not connected - could not send payment");
     }
 
-    await logAction(tradeId, interaction.user.id, "DELIVERY_CONFIRMED", { feeAmount, sellerReceives });
+    await logAction(tradeId, interaction.user.id, "FUNDS_RELEASED", { feeAmount, receiverGets });
 
     try {
       await interaction.message.delete();
     } catch (e) {}
 
-    const completedEmbed = createCompletedEmbed(trade, feeAmount, sellerReceives);
+    const completedEmbed = createCompletedEmbed(trade, feeAmount, receiverGets);
 
     await interaction.channel.send({
       content: `<@${trade.sellerDiscordId}> <@${trade.buyerDiscordId}>`,
@@ -231,10 +500,38 @@ async function handleConfirmDelivered(interaction) {
 
     await refreshPublicEmbed(interaction.client, guild.id);
   } catch (error) {
-    console.error("Confirm delivered error:", error);
+    console.error("Confirm release error:", error);
     if (!interaction.replied) {
       await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
     }
+  }
+}
+
+async function handleBackRelease(interaction) {
+  const tradeId = parseInt(interaction.customId.split("_").pop());
+
+  try {
+    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    if (!trade) {
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+    }
+
+    await interaction.deferUpdate();
+
+    try {
+      await interaction.message.delete();
+    } catch (e) {}
+
+    const proceedEmbed = createProceedWithDealEmbed(trade);
+    const releaseButtons = createReleaseButtons(tradeId);
+
+    await interaction.channel.send({ 
+      embeds: [proceedEmbed], 
+      components: [releaseButtons] 
+    });
+  } catch (error) {
+    console.error("Back release error:", error);
   }
 }
 
@@ -275,181 +572,6 @@ async function handleMarkScammedButton(interaction) {
   }
 }
 
-async function handleShowCancelButtons(interaction) {
-  const tradeId = parseInt(interaction.customId.split("_").pop());
-
-  try {
-    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
-
-    if (!trade) {
-      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
-    }
-
-    const userId = interaction.user.id;
-    if (trade.sellerDiscordId !== userId && trade.buyerDiscordId !== userId) {
-      return interaction.reply({ content: "Only trade participants can cancel.", flags: MessageFlags.Ephemeral });
-    }
-
-    if (trade.status === "COMPLETED" || trade.status === "CANCELLED") {
-      return interaction.reply({ content: `Trade already ${trade.status.toLowerCase()}.`, flags: MessageFlags.Ephemeral });
-    }
-
-    const cancelButtons = createCancelConfirmButtons(tradeId, trade.sellerCancelConfirm, trade.buyerCancelConfirm);
-
-    const embed = new EmbedBuilder()
-      .setTitle("Cancel Trade Confirmation")
-      .setColor(0xFFA500)
-      .setDescription("Both parties must confirm to cancel this trade.\nClick your button to confirm cancellation.")
-      .addFields(
-        { name: "Seller", value: trade.sellerCancelConfirm ? "✅ Confirmed" : "❌ Not confirmed", inline: true },
-        { name: "Buyer", value: trade.buyerCancelConfirm ? "✅ Confirmed" : "❌ Not confirmed", inline: true }
-      )
-      .setFooter({ text: `Trade #${tradeId}` })
-      .setTimestamp();
-
-    await interaction.reply({
-      embeds: [embed],
-      components: [cancelButtons],
-    });
-  } catch (error) {
-    console.error("Show cancel buttons error:", error);
-    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
-  }
-}
-
-function createCancelConfirmButtons(tradeId, sellerConfirmed, buyerConfirmed) {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`cancel_confirm_seller_${tradeId}`)
-      .setLabel("Seller Confirm")
-      .setStyle(sellerConfirmed ? ButtonStyle.Success : ButtonStyle.Danger),
-    new ButtonBuilder()
-      .setCustomId(`cancel_confirm_buyer_${tradeId}`)
-      .setLabel("Buyer Confirm")
-      .setStyle(buyerConfirmed ? ButtonStyle.Success : ButtonStyle.Danger)
-  );
-}
-
-async function handleCancelConfirm(interaction, party) {
-  const tradeId = parseInt(interaction.customId.split("_").pop());
-
-  try {
-    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
-
-    if (!trade) {
-      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
-    }
-
-    const userId = interaction.user.id;
-    const isSeller = trade.sellerDiscordId === userId;
-    const isBuyer = trade.buyerDiscordId === userId;
-
-    if (!isSeller && !isBuyer) {
-      return interaction.reply({ content: "Only trade participants can cancel.", flags: MessageFlags.Ephemeral });
-    }
-
-    // Check if user is clicking the correct button
-    if (party === "seller" && !isSeller) {
-      return interaction.reply({ content: "Only the seller can click this button.", flags: MessageFlags.Ephemeral });
-    }
-    if (party === "buyer" && !isBuyer) {
-      return interaction.reply({ content: "Only the buyer can click this button.", flags: MessageFlags.Ephemeral });
-    }
-
-    if (trade.status === "COMPLETED" || trade.status === "CANCELLED") {
-      return interaction.reply({ content: `Trade already ${trade.status.toLowerCase()}.`, flags: MessageFlags.Ephemeral });
-    }
-
-    await interaction.deferUpdate();
-
-    // Update the confirmation
-    const updateData = {
-      updatedAt: new Date(),
-    };
-    if (party === "seller") {
-      updateData.sellerCancelConfirm = true;
-    } else {
-      updateData.buyerCancelConfirm = true;
-    }
-
-    await db.update(trades).set(updateData).where(eq(trades.id, tradeId));
-
-    // Refetch trade to check if both confirmed
-    const [updatedTrade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
-
-    if (updatedTrade.sellerCancelConfirm && updatedTrade.buyerCancelConfirm) {
-      // Both confirmed - cancel the trade
-      await db.update(trades).set({
-        status: "CANCELLED",
-        updatedAt: new Date(),
-      }).where(eq(trades.id, tradeId));
-
-      await db.update(tickets).set({
-        status: "CLOSED",
-        updatedAt: new Date(),
-      }).where(eq(tickets.tradeId, tradeId));
-
-      // Refund buyer if escrow has funds
-      const escrowBalance = parseFloat(updatedTrade.escrowBalance) || 0;
-      if (escrowBalance > 0 && minecraftBot.isConnected()) {
-        const payCommand = `/pay ${updatedTrade.buyerMc} ${escrowBalance.toFixed(2)}`;
-        minecraftBot.sendChat(payCommand);
-        console.log(`Refund on cancel: ${payCommand}`);
-      }
-
-      await logAction(tradeId, userId, "TRADE_CANCELLED", { cancelledBy: "mutual" });
-
-      const cancelledEmbed = new EmbedBuilder()
-        .setTitle("Trade Cancelled")
-        .setColor(0xFF0000)
-        .setDescription("Both parties agreed to cancel this trade.")
-        .addFields(
-          { name: "Seller", value: `<@${updatedTrade.sellerDiscordId}>`, inline: true },
-          { name: "Buyer", value: `<@${updatedTrade.buyerDiscordId}>`, inline: true }
-        )
-        .setFooter({ text: `Trade #${tradeId}` })
-        .setTimestamp();
-
-      if (escrowBalance > 0) {
-        cancelledEmbed.addFields({ name: "Refund", value: `${formatAmount(escrowBalance)} returned to buyer` });
-      }
-
-      await interaction.editReply({
-        embeds: [cancelledEmbed],
-        components: [],
-      });
-
-      await refreshPublicEmbed(interaction.client, interaction.guild.id);
-    } else {
-      // Update the buttons to show new state
-      const cancelButtons = createCancelConfirmButtons(tradeId, updatedTrade.sellerCancelConfirm, updatedTrade.buyerCancelConfirm);
-
-      const embed = new EmbedBuilder()
-        .setTitle("Cancel Trade Confirmation")
-        .setColor(0xFFA500)
-        .setDescription("Both parties must confirm to cancel this trade.\nClick your button to confirm cancellation.")
-        .addFields(
-          { name: "Seller", value: updatedTrade.sellerCancelConfirm ? "✅ Confirmed" : "❌ Not confirmed", inline: true },
-          { name: "Buyer", value: updatedTrade.buyerCancelConfirm ? "✅ Confirmed" : "❌ Not confirmed", inline: true }
-        )
-        .setFooter({ text: `Trade #${tradeId}` })
-        .setTimestamp();
-
-      await interaction.editReply({
-        embeds: [embed],
-        components: [cancelButtons],
-      });
-
-      await logAction(tradeId, userId, "CANCEL_CONFIRMED", { party });
-    }
-  } catch (error) {
-    console.error("Cancel confirm error:", error);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
-    }
-  }
-}
-
 async function handleAdjudicateButton(interaction, decision) {
   const tradeId = parseInt(interaction.customId.split("_").pop());
 
@@ -471,24 +593,24 @@ async function handleAdjudicateButton(interaction, decision) {
     await interaction.deferUpdate();
 
     const saleAmount = parseFloat(trade.saleAmount);
-    const feeAmount = saleAmount * 0.05;
+    const feeAmount = saleAmount * (FEE_PERCENT / 100);
 
     let recipientId, recipientMc, amountReleased;
 
     if (decision === "seller") {
       recipientId = trade.sellerDiscordId;
       recipientMc = trade.sellerMc;
-      amountReleased = saleAmount - feeAmount;
+      amountReleased = saleAmount;
     } else {
       recipientId = trade.buyerDiscordId;
       recipientMc = trade.buyerMc;
-      amountReleased = saleAmount;
+      amountReleased = saleAmount - feeAmount;
     }
 
     await db.update(trades).set({
       status: "COMPLETED",
       frozen: false,
-      feeAmount: decision === "seller" ? feeAmount.toFixed(2) : "0.00",
+      feeAmount: decision === "buyer" ? feeAmount.toFixed(2) : "0.00",
       updatedAt: new Date(),
     }).where(eq(trades.id, tradeId));
 
@@ -497,7 +619,6 @@ async function handleAdjudicateButton(interaction, decision) {
       updatedAt: new Date(),
     }).where(eq(tickets.tradeId, tradeId));
 
-    // Send payment to recipient in Minecraft
     if (minecraftBot.isConnected()) {
       const payCommand = `/pay ${recipientMc} ${amountReleased.toFixed(2)}`;
       minecraftBot.sendChat(payCommand);
@@ -516,8 +637,8 @@ async function handleAdjudicateButton(interaction, decision) {
       .setTitle("Dispute Resolved")
       .setColor(0x00FF00)
       .setDescription(
-        `Funds released to ${decision}.\n\n` +
-        `<@${recipientId}> (${recipientMc}) receives **${formatAmount(amountReleased)}**.`
+        `Funds released to ${decision === "seller" ? "sender" : "receiver"}.\n\n` +
+        `<@${recipientId}> (${recipientMc}) receives **${amountReleased.toFixed(2)}**.`
       )
       .setFooter({ text: `Resolved by ${interaction.user.tag}` })
       .setTimestamp();
@@ -528,28 +649,6 @@ async function handleAdjudicateButton(interaction, decision) {
     if (!interaction.replied) {
       await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
     }
-  }
-}
-
-async function handleCloseDispute(interaction) {
-  const tradeId = parseInt(interaction.customId.split("_").pop());
-
-  if (!interaction.member.permissions.has("Administrator")) {
-    return interaction.reply({ content: "Admin only.", flags: MessageFlags.Ephemeral });
-  }
-
-  try {
-    await db.update(tickets).set({
-      status: "CLOSED",
-      updatedAt: new Date(),
-    }).where(eq(tickets.tradeId, tradeId));
-
-    await logAction(tradeId, interaction.user.id, "DISPUTE_CLOSED", {});
-
-    await interaction.reply({ content: `Dispute #${tradeId} closed.` });
-  } catch (error) {
-    console.error("Close dispute error:", error);
-    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
   }
 }
 
