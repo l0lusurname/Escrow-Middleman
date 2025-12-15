@@ -172,53 +172,50 @@ export async function getDailyStats(guildId) {
   }
 }
 
+function formatCurrency(amount) {
+  if (amount >= 1000000) {
+    return `$${(amount / 1000000).toFixed(2)}M`;
+  } else if (amount >= 1000) {
+    return `$${(amount / 1000).toFixed(1)}K`;
+  }
+  return `$${amount.toFixed(2)}`;
+}
+
 export function createAdminPanelEmbed(stats) {
+  const disputeStatus = stats.disputes > 0 
+    ? `\`${stats.disputes}\` open` 
+    : `\`0\` open`;
+
   const embed = new EmbedBuilder()
-    .setTitle("Admin Dashboard")
+    .setTitle("Donut SMP Middleman Dashboard")
     .setColor(0xF5A623)
+    .setDescription(
+      `### Today's Performance\n` +
+      `\`\`\`\n` +
+      `Earnings:  ${formatCurrency(stats.today.fees).padStart(12)}\n` +
+      `Volume:    ${formatCurrency(stats.today.volume).padStart(12)}\n` +
+      `Trades:    ${String(stats.today.trades).padStart(12)}\n` +
+      `\`\`\``
+    )
     .addFields(
       {
-        name: "Today's Earnings",
-        value: `$${stats.today.fees.toFixed(2)}`,
+        name: "All-Time Stats",
+        value: 
+          `> **Earnings:** ${formatCurrency(stats.allTime.fees)}\n` +
+          `> **Volume:** ${formatCurrency(stats.allTime.volume)}\n` +
+          `> **Trades:** ${stats.allTime.trades.toLocaleString()}`,
         inline: true,
       },
       {
-        name: "Today's Volume",
-        value: `$${stats.today.volume.toFixed(2)}`,
-        inline: true,
-      },
-      {
-        name: "Trades Today",
-        value: `${stats.today.trades}`,
-        inline: true,
-      },
-      {
-        name: "All-Time Earnings",
-        value: `$${stats.allTime.fees.toFixed(2)}`,
-        inline: true,
-      },
-      {
-        name: "All-Time Volume",
-        value: `$${stats.allTime.volume.toFixed(2)}`,
-        inline: true,
-      },
-      {
-        name: "Total Trades",
-        value: `${stats.allTime.trades}`,
-        inline: true,
-      },
-      {
-        name: "Active Trades",
-        value: `${stats.active}`,
-        inline: true,
-      },
-      {
-        name: "Open Disputes",
-        value: `${stats.disputes}`,
+        name: "Current Status",
+        value: 
+          `> **Active:** \`${stats.active}\` trades\n` +
+          `> **Disputes:** ${disputeStatus}\n` +
+          `> **Bot:** Online`,
         inline: true,
       }
     )
-    .setFooter({ text: "Donut SMP Middleman Stats" })
+    .setFooter({ text: "Donut SMP Middleman | Admin Panel" })
     .setTimestamp();
 
   return embed;
