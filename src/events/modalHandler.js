@@ -11,7 +11,8 @@ import {
   createConfirmRolesButtons,
   createAmountConfirmationEmbed,
   createAmountConfirmationButtons,
-  deleteLastBotMessage 
+  deleteLastBotMessage,
+  createVouchEmbed
 } from "../ui/tradeChannel.js";
 import { refreshPublicEmbed } from "../ui/publicEmbed.js";
 
@@ -26,6 +27,8 @@ export async function handleModalSubmit(interaction) {
     return handleEvidenceModal(interaction);
   } else if (customId.startsWith("mc_usernames_modal_")) {
     return handleMcUsernamesModal(interaction);
+  } else if (customId.startsWith("review_modal_")) {
+    return handleReviewModal(interaction);
   }
 }
 
@@ -378,5 +381,78 @@ async function handleEvidenceModal(interaction) {
   } catch (error) {
     console.error("Evidence modal error:", error);
     await interaction.reply({ content: "Something went wrong. Please try again!", flags: MessageFlags.Ephemeral });
+  }
+}
+
+async function handleReviewModal(interaction) {
+  const tradeId = parseInt(interaction.customId.split("_").pop());
+  const ratingStr = interaction.fields.getTextInputValue("rating").trim();
+  const reviewText = interaction.fields.getTextInputValue("review").trim();
+
+  const rating = parseInt(ratingStr);
+  if (isNaN(rating) || rating < 1 || rating > 5) {
+    return interaction.reply({ 
+      content: "Please enter a valid rating between 1 and 5.", 
+      flags: MessageFlags.Ephemeral 
+    });
+  }
+
+  try {
+    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    if (!trade) {
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+    }
+
+    const userId = interaction.user.id;
+    if (trade.sellerDiscordId !== userId && trade.buyerDiscordId !== userId) {
+      return interaction.reply({ 
+        content: "Only trade participants can leave a review.", 
+        flags: MessageFlags.Ephemeral 
+      });
+    }
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    const guild = interaction.guild;
+    const [config] = await db.select().from(botConfig).where(eq(botConfig.guildId, guild.id)).limit(1);
+
+    if (!config?.vouchChannelId) {
+      return interaction.editReply({ content: "Reviews are not set up yet. Please contact an admin." });
+    }
+
+    const vouchEmbed = createVouchEmbed(trade, userId, rating, reviewText);
+
+    try {
+      const vouchChannel = await guild.channels.fetch(config.vouchChannelId);
+      if (vouchChannel) {
+        await vouchChannel.send({ embeds: [vouchEmbed] });
+      }
+    } catch (e) {
+      console.error("Could not post to vouch channel:", e);
+      return interaction.editReply({ content: "Couldn't post your review. Please contact an admin." });
+    }
+
+    await logAction(tradeId, userId, "REVIEW_SUBMITTED", { rating, review: reviewText });
+
+    await interaction.editReply({ 
+      content: `Thanks for your review! Your ${rating}-star vouch has been posted.` 
+    });
+
+    try {
+      await interaction.message.edit({ components: [] });
+    } catch (e) {}
+
+  } catch (error) {
+    console.error("Review modal error:", error);
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content: "Something went wrong. Please try again!" });
+      } else {
+        await interaction.reply({ content: "Something went wrong. Please try again!", flags: MessageFlags.Ephemeral });
+      }
+    } catch (e) {
+      console.error("Could not send error response:", e);
+    }
   }
 }

@@ -16,6 +16,7 @@ import {
   handleSetMmChannel,
   handlePostEmbed,
   handlePay,
+  handleSetVouchChannel,
 } from "./commands/handlers/adminCommands.js";
 import { handleButtonInteraction } from "./events/buttonHandler.js";
 import { handleModalSubmit, handlePartnerMention, handleAmountMessage } from "./events/modalHandler.js";
@@ -160,6 +161,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
             break;
           case "pay":
             await handlePay(interaction);
+            break;
+          case "set_vouch_channel":
+            await handleSetVouchChannel(interaction);
             break;
           default:
             await interaction.reply({ content: "Unknown subcommand.", ephemeral: true });

@@ -379,3 +379,35 @@ export async function handlePay(interaction) {
     await interaction.editReply({ content: "An error occurred while sending the payment." });
   }
 }
+
+export async function handleSetVouchChannel(interaction) {
+  if (!checkAdmin(interaction)) {
+    return interaction.reply({ content: "You don't have permission to use this command.", ephemeral: true });
+  }
+
+  const channel = interaction.options.getChannel("channel");
+  const guildId = interaction.guild.id;
+
+  try {
+    await interaction.deferReply({ ephemeral: true });
+
+    const [existing] = await db.select().from(botConfig).where(eq(botConfig.guildId, guildId)).limit(1);
+
+    if (existing) {
+      await db.update(botConfig).set({
+        vouchChannelId: channel.id,
+        updatedAt: new Date(),
+      }).where(eq(botConfig.guildId, guildId));
+    } else {
+      await db.insert(botConfig).values({
+        guildId,
+        vouchChannelId: channel.id,
+      });
+    }
+
+    await interaction.editReply({ content: `Vouch channel set to ${channel}. Reviews will be posted there after completed trades!` });
+  } catch (error) {
+    console.error("Set vouch channel error:", error);
+    await interaction.editReply({ content: "An error occurred while setting the vouch channel." });
+  }
+}

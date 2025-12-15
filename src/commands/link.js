@@ -144,6 +144,14 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand((sub) =>
     sub
+      .setName("set_vouch_channel")
+      .setDescription("Admin: Set the channel where trade reviews/vouches are posted")
+      .addChannelOption((opt) =>
+        opt.setName("channel").setDescription("The channel for vouches and reviews").setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
       .setName("pay")
       .setDescription("Owner: Make the bot pay a player in Minecraft")
       .addStringOption((opt) =>

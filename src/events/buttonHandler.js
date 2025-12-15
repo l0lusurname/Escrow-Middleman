@@ -26,7 +26,9 @@ import {
   createDisputeEmbed,
   createDisputeButtons,
   createEscrowButtons,
-  deleteLastBotMessage
+  deleteLastBotMessage,
+  createReviewPromptEmbed,
+  createReviewButton
 } from "../ui/tradeChannel.js";
 import { refreshPublicEmbed } from "../ui/publicEmbed.js";
 import { minecraftBot } from "../minecraft/mineflayer.js";
@@ -71,6 +73,8 @@ export async function handleButtonInteraction(interaction) {
     return handleAttachEvidence(interaction);
   } else if (customId.startsWith("mark_scammed_")) {
     return handleMarkScammedButton(interaction);
+  } else if (customId.startsWith("leave_review_")) {
+    return handleLeaveReview(interaction);
   }
 }
 
@@ -490,6 +494,15 @@ async function handleConfirmRelease(interaction) {
     const guild = interaction.guild;
     const [config] = await db.select().from(botConfig).where(eq(botConfig.guildId, guild.id)).limit(1);
 
+    if (config?.vouchChannelId) {
+      const reviewEmbed = createReviewPromptEmbed(trade);
+      const reviewButton = createReviewButton(tradeId);
+      await interaction.channel.send({ 
+        embeds: [reviewEmbed], 
+        components: [reviewButton] 
+      });
+    }
+
     if (config?.completionChannelId) {
       try {
         const channel = await guild.channels.fetch(config.completionChannelId);
@@ -677,6 +690,53 @@ async function handleAttachEvidence(interaction) {
     await interaction.showModal(modal);
   } catch (error) {
     console.error("Attach evidence error:", error);
+    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+  }
+}
+
+async function handleLeaveReview(interaction) {
+  const tradeId = parseInt(interaction.customId.split("_").pop());
+
+  try {
+    const [trade] = await db.select().from(trades).where(eq(trades.id, tradeId)).limit(1);
+
+    if (!trade) {
+      return interaction.reply({ content: "Trade not found.", flags: MessageFlags.Ephemeral });
+    }
+
+    const userId = interaction.user.id;
+    if (trade.sellerDiscordId !== userId && trade.buyerDiscordId !== userId) {
+      return interaction.reply({ content: "Only trade participants can leave a review.", flags: MessageFlags.Ephemeral });
+    }
+
+    const modal = new ModalBuilder()
+      .setCustomId(`review_modal_${tradeId}`)
+      .setTitle("Leave a Review")
+      .addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId("rating")
+            .setLabel("Rating (1-5 stars)")
+            .setStyle(TextInputStyle.Short)
+            .setPlaceholder("Enter a number from 1 to 5")
+            .setRequired(true)
+            .setMinLength(1)
+            .setMaxLength(1)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId("review")
+            .setLabel("Your Review")
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder("How was your experience with the middleman service?")
+            .setRequired(true)
+            .setMaxLength(500)
+        )
+      );
+
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error("Leave review error:", error);
     await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
   }
 }

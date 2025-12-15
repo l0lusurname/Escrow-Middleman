@@ -478,3 +478,48 @@ export function createDisputeButtons(tradeId) {
       .setEmoji("📎")
   );
 }
+
+export function createReviewPromptEmbed(trade) {
+  const embed = new EmbedBuilder()
+    .setColor(0x5865F2)
+    .setTitle("Leave a Review!")
+    .setDescription(
+      `Enjoyed using our middleman service? Let others know!\n\n` +
+      `Click the button below to leave a quick review. Your feedback helps build trust in our community.`
+    )
+    .setFooter({ text: "Reviews are posted publicly" });
+
+  return embed;
+}
+
+export function createReviewButton(tradeId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`leave_review_${tradeId}`)
+      .setLabel("Leave a Review")
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji("⭐")
+  );
+}
+
+export function createVouchEmbed(trade, reviewerDiscordId, rating, reviewText) {
+  const stars = "⭐".repeat(rating) + "☆".repeat(5 - rating);
+  const saleAmount = parseFloat(trade.saleAmount);
+  
+  const embed = new EmbedBuilder()
+    .setColor(0x57F287)
+    .setTitle("New Vouch!")
+    .setDescription(
+      `${stars}\n\n` +
+      `"${reviewText}"`
+    )
+    .addFields(
+      { name: "Reviewer", value: `<@${reviewerDiscordId}>`, inline: true },
+      { name: "Trade Value", value: `$${saleAmount.toFixed(2)}`, inline: true },
+      { name: "Trade ID", value: `#${trade.id}`, inline: true }
+    )
+    .setFooter({ text: "Donut SMP Middleman | Verified Trade" })
+    .setTimestamp();
+
+  return embed;
+}

@@ -77,6 +77,7 @@ export const botConfig = pgTable("bot_config", {
   staffChannelId: text("staff_channel_id"),
   publicMiddlemanChannelId: text("public_middleman_channel_id"),
   publicEmbedMessageId: text("public_embed_message_id"),
+  vouchChannelId: text("vouch_channel_id"),
   verificationTimeoutMinutes: integer("verification_timeout_minutes").default(10),
   webhookSecret: text("webhook_secret"),
   createdAt: timestamp("created_at").defaultNow(),

@@ -79,6 +79,7 @@ src/
 | `/mm unfreeze <trade_id>` | Admin: unfreeze trade |
 | `/mm close_ticket <trade_id> [notes]` | Admin: close ticket |
 | `/mm setchannel #channel` | Admin: set completion log channel |
+| `/mm set_vouch_channel #channel` | Admin: set the vouch/review channel |
 | `/mm set_support_role @role` | Admin: set support role |
 | `/mm set_mm_channel #channel` | Admin: set public middleman channel |
 | `/mm post_embed` | Admin: post/refresh public middleman embed |
@@ -121,6 +122,7 @@ Headers required for webhooks:
 
 ## Recent Changes
 
+- Dec 2024: Added vouch/review system - users can leave reviews after trades which post to a configurable channel
 - Dec 2024: Rebranded from "Cryptocurrency Middleman" to "Donut SMP Middleman" - all references updated
 - Dec 2024: New orange/blue color theme (#F5A623, #5865F2) for better visual identity
 - Dec 2024: Fixed role confirmation flow - now only appears AFTER user selects a role, not immediately
