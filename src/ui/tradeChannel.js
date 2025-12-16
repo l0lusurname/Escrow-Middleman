@@ -18,7 +18,7 @@ import { logAction } from "../utils/auditLog.js";
 
 const BOT_MC_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
 
-async function getGuildFeePercent(guildId) {
+export async function getGuildFeePercent(guildId) {
   if (!guildId) return 5.0;
   const [config] = await db.select().from(botConfig).where(eq(botConfig.guildId, guildId)).limit(1);
   return parseFloat(config?.feePercent || "5.00");

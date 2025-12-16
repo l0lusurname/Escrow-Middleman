@@ -47,7 +47,9 @@ export async function handleAdjudicate(interaction) {
 
     const escrowBalance = parseFloat(trade.escrowBalance || 0);
     const saleAmount = parseFloat(trade.saleAmount);
-    const feeAmount = saleAmount * 0.05;
+    const config = await getGuildConfig(interaction.guild.id);
+    const feePercent = parseFloat(config?.feePercent || "5.00");
+    const feeAmount = saleAmount * (feePercent / 100);
 
     let recipientId, recipientMc, amountReleased;
 
@@ -90,11 +92,11 @@ export async function handleAdjudicate(interaction) {
     await interaction.editReply({ embeds: [embed] });
 
     const guild = interaction.guild;
-    const [config] = await db.select().from(botConfig).where(eq(botConfig.guildId, guild.id)).limit(1);
+    const [guildConfig] = await db.select().from(botConfig).where(eq(botConfig.guildId, guild.id)).limit(1);
 
-    if (config?.completionChannelId) {
+    if (guildConfig?.completionChannelId) {
       try {
-        const channel = await guild.channels.fetch(config.completionChannelId);
+        const channel = await guild.channels.fetch(guildConfig.completionChannelId);
         if (channel) {
           await channel.send({
             content: `Trade #${tradeId} has been adjudicated. Funds released to <@${recipientId}>.`,

@@ -90,7 +90,8 @@ export async function handleCreate(interaction) {
       status: "OPEN",
     });
 
-    const feeAmount = (saleAmount * 0.05).toFixed(2);
+    const feePercent = parseFloat(config[0]?.feePercent || "5.00");
+    const feeAmount = (saleAmount * (feePercent / 100)).toFixed(2);
     const sellerReceives = (saleAmount - parseFloat(feeAmount)).toFixed(2);
 
     const embed = new EmbedBuilder()
@@ -100,7 +101,7 @@ export async function handleCreate(interaction) {
         { name: "Seller", value: `<@${sellerDiscordId}> (${sellerMc})`, inline: true },
         { name: "Buyer", value: `<@${buyerDiscordId}> (${buyerMc})`, inline: true },
         { name: "Sale Amount", value: formatAmount(saleAmount), inline: true },
-        { name: "Fee (5%)", value: formatAmount(feeAmount), inline: true },
+        { name: `Fee (${feePercent}%)`, value: formatAmount(feeAmount), inline: true },
         { name: "Seller Receives", value: formatAmount(sellerReceives), inline: true },
         { name: "Status", value: "CREATED - Awaiting Verification", inline: true },
       )
