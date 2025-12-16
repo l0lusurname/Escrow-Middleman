@@ -83,6 +83,8 @@ src/
 | `/mm set_support_role @role` | Admin: set support role |
 | `/mm set_mm_channel #channel` | Admin: set public middleman channel |
 | `/mm post_embed` | Admin: post/refresh public middleman embed |
+| `/mm panel` | Admin: open interactive settings panel |
+| `/mm set_fee <percent>` | Admin: set service fee percentage |
 
 ## Environment Variables
 
@@ -122,6 +124,10 @@ Headers required for webhooks:
 
 ## Recent Changes
 
+- Dec 2024: Added interactive admin panel (`/mm panel`) with buttons to edit fee percentage and trade limits
+- Dec 2024: Service fee is now configurable per-guild (stored in database) instead of hardcoded 5%
+- Dec 2024: Added trade limits (min/max amounts) that admins can configure via the panel
+- Dec 2024: Close ticket prompt appears after completed trades encouraging cleanup
 - Dec 2024: Added vouch/review system - users can leave reviews after trades which post to a configurable channel
 - Dec 2024: Rebranded from "Cryptocurrency Middleman" to "Donut SMP Middleman" - all references updated
 - Dec 2024: New orange/blue color theme (#F5A623, #5865F2) for better visual identity
