@@ -1,4 +1,4 @@
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags } from "discord.js";
+import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, MessageFlags, PermissionFlagsBits } from "discord.js";
 import { db } from "../db/index.js";
 import { trades, tickets, botConfig } from "../db/schema.js";
 import { eq } from "drizzle-orm";
@@ -30,18 +30,29 @@ import {
   createReviewPromptEmbed,
   createReviewButton
 } from "../ui/tradeChannel.js";
-import { refreshPublicEmbed } from "../ui/publicEmbed.js";
+import { refreshPublicEmbed, postOrUpdatePublicEmbed } from "../ui/publicEmbed.js";
 import { minecraftBot } from "../minecraft/mineflayer.js";
+import {
+  getGuildConfig,
+  getGuildFeePercent,
+  getDailyStats,
+  createAdminPanelEmbed,
+  createAdminPanelButtons,
+  createChangeFeeModal,
+  createSetLimitsModal,
+  createChannelConfigEmbed,
+  createCloseTicketPromptEmbed,
+  createCloseTicketButton
+} from "../ui/adminPanel.js";
 
 const BOT_MC_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
-const FEE_PERCENT = parseFloat(process.env.FEE_PERCENT) || 5.0;
 
 export async function handleButtonInteraction(interaction) {
   const customId = interaction.customId;
 
   if (customId === "start_middleman") {
     return handleStartMiddleman(interaction);
-  } else if (customId.startsWith("close_ticket_")) {
+  } else if (customId.startsWith("close_ticket_") || customId.startsWith("close_completed_ticket_")) {
     return handleCloseTicket(interaction);
   } else if (customId.startsWith("role_sending_") || customId.startsWith("role_receiving_")) {
     return handleRoleSelection(interaction);
@@ -75,6 +86,16 @@ export async function handleButtonInteraction(interaction) {
     return handleMarkScammedButton(interaction);
   } else if (customId.startsWith("leave_review_")) {
     return handleLeaveReview(interaction);
+  } else if (customId === "admin_change_fee") {
+    return handleAdminChangeFee(interaction);
+  } else if (customId === "admin_set_limits") {
+    return handleAdminSetLimits(interaction);
+  } else if (customId === "admin_refresh_stats") {
+    return handleAdminRefreshStats(interaction);
+  } else if (customId === "admin_view_channels") {
+    return handleAdminViewChannels(interaction);
+  } else if (customId === "admin_post_embed") {
+    return handleAdminPostEmbed(interaction);
   }
 }
 
@@ -279,7 +300,8 @@ async function handleAmountConfirm(interaction) {
       await interaction.message.delete();
     } catch (e) {}
 
-    const summaryEmbed = createDealSummaryEmbed(trade);
+    const feePercent = await getGuildFeePercent(interaction.guild.id);
+    const summaryEmbed = createDealSummaryEmbed(trade, feePercent);
     const invoiceEmbed = createPaymentInvoiceEmbed(trade);
     const copyButton = createCopyDetailsButton(tradeId);
     const awaitingEmbed = createAwaitingPaymentEmbed();
@@ -375,8 +397,9 @@ async function handleReleaseFunds(interaction) {
 
     await interaction.deferUpdate();
 
+    const feePercent = await getGuildFeePercent(interaction.guild.id);
     const supportEmbed = createSupportNotificationEmbed();
-    const releaseEmbed = createReleaseConfirmationEmbed(trade);
+    const releaseEmbed = createReleaseConfirmationEmbed(trade, feePercent);
     const releaseButtons = createReleaseConfirmButtons(tradeId);
 
     await interaction.channel.send({ embeds: [supportEmbed] });
@@ -454,13 +477,17 @@ async function handleConfirmRelease(interaction) {
 
     await interaction.deferUpdate();
 
+    const guild = interaction.guild;
+    const feePercent = await getGuildFeePercent(guild.id);
+    
     const saleAmount = parseFloat(trade.saleAmount);
-    const feeAmount = saleAmount * (FEE_PERCENT / 100);
+    const feeAmount = saleAmount * (feePercent / 100);
     const receiverGets = saleAmount - feeAmount;
 
     await db.update(trades).set({
       status: "COMPLETED",
       feeAmount: feeAmount.toFixed(2),
+      feePercent: feePercent.toFixed(2),
       escrowBalance: "0.00",
       updatedAt: new Date(),
     }).where(eq(trades.id, tradeId));
@@ -478,7 +505,7 @@ async function handleConfirmRelease(interaction) {
       console.error("Minecraft bot not connected - could not send payment");
     }
 
-    await logAction(tradeId, interaction.user.id, "FUNDS_RELEASED", { feeAmount, receiverGets });
+    await logAction(tradeId, interaction.user.id, "FUNDS_RELEASED", { feeAmount, receiverGets, feePercent });
 
     try {
       await interaction.message.delete();
@@ -491,7 +518,6 @@ async function handleConfirmRelease(interaction) {
       embeds: [completedEmbed],
     });
 
-    const guild = interaction.guild;
     const [config] = await db.select().from(botConfig).where(eq(botConfig.guildId, guild.id)).limit(1);
 
     if (config?.vouchChannelId) {
@@ -502,6 +528,13 @@ async function handleConfirmRelease(interaction) {
         components: [reviewButton] 
       });
     }
+
+    const closePromptEmbed = createCloseTicketPromptEmbed();
+    const closeButton = createCloseTicketButton(tradeId);
+    await interaction.channel.send({
+      embeds: [closePromptEmbed],
+      components: [closeButton]
+    });
 
     if (config?.completionChannelId) {
       try {
@@ -608,8 +641,9 @@ async function handleAdjudicateButton(interaction, decision) {
 
     await interaction.deferUpdate();
 
+    const feePercent = await getGuildFeePercent(interaction.guild.id);
     const saleAmount = parseFloat(trade.saleAmount);
-    const feeAmount = saleAmount * (FEE_PERCENT / 100);
+    const feeAmount = saleAmount * (feePercent / 100);
 
     let recipientId, recipientMc, amountReleased;
 
@@ -738,5 +772,89 @@ async function handleLeaveReview(interaction) {
   } catch (error) {
     console.error("Leave review error:", error);
     await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+  }
+}
+
+async function handleAdminChangeFee(interaction) {
+  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: "You don't have permission to do this.", flags: MessageFlags.Ephemeral });
+  }
+
+  try {
+    const modal = createChangeFeeModal();
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error("Admin change fee error:", error);
+    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+  }
+}
+
+async function handleAdminSetLimits(interaction) {
+  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: "You don't have permission to do this.", flags: MessageFlags.Ephemeral });
+  }
+
+  try {
+    const config = await getGuildConfig(interaction.guild.id);
+    const modal = createSetLimitsModal(config);
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error("Admin set limits error:", error);
+    await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+  }
+}
+
+async function handleAdminRefreshStats(interaction) {
+  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: "You don't have permission to do this.", flags: MessageFlags.Ephemeral });
+  }
+
+  try {
+    await interaction.deferUpdate();
+    const stats = await getDailyStats(interaction.guild.id);
+    const config = await getGuildConfig(interaction.guild.id);
+    const embed = createAdminPanelEmbed(stats, config);
+    const buttons = createAdminPanelButtons();
+    await interaction.editReply({ embeds: [embed], components: buttons });
+  } catch (error) {
+    console.error("Admin refresh stats error:", error);
+    if (!interaction.replied) {
+      await interaction.reply({ content: "An error occurred.", flags: MessageFlags.Ephemeral });
+    }
+  }
+}
+
+async function handleAdminViewChannels(interaction) {
+  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: "You don't have permission to do this.", flags: MessageFlags.Ephemeral });
+  }
+
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const config = await getGuildConfig(interaction.guild.id);
+    const embed = createChannelConfigEmbed(config, interaction.guild);
+    await interaction.editReply({ embeds: [embed] });
+  } catch (error) {
+    console.error("Admin view channels error:", error);
+    await interaction.editReply({ content: "An error occurred." });
+  }
+}
+
+async function handleAdminPostEmbed(interaction) {
+  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: "You don't have permission to do this.", flags: MessageFlags.Ephemeral });
+  }
+
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const message = await postOrUpdatePublicEmbed(interaction.client, interaction.guild.id);
+    if (message) {
+      await interaction.editReply({ content: "Public middleman embed posted/updated successfully!" });
+    } else {
+      await interaction.editReply({ content: "Failed to post embed. Make sure you've set the middleman channel with `/mm set_mm_channel` first." });
+    }
+  } catch (error) {
+    console.error("Admin post embed error:", error);
+    await interaction.editReply({ content: "An error occurred while posting the embed." });
   }
 }

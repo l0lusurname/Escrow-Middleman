@@ -29,6 +29,10 @@ export async function handleModalSubmit(interaction) {
     return handleMcUsernamesModal(interaction);
   } else if (customId.startsWith("review_modal_")) {
     return handleReviewModal(interaction);
+  } else if (customId === "admin_fee_modal") {
+    return handleAdminFeeModal(interaction);
+  } else if (customId === "admin_limits_modal") {
+    return handleAdminLimitsModal(interaction);
   }
 }
 
@@ -454,5 +458,123 @@ async function handleReviewModal(interaction) {
     } catch (e) {
       console.error("Could not send error response:", e);
     }
+  }
+}
+
+async function handleAdminFeeModal(interaction) {
+  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: "You don't have permission to do this.", flags: MessageFlags.Ephemeral });
+  }
+
+  const newFeeStr = interaction.fields.getTextInputValue("new_fee").trim();
+  const newFee = parseFloat(newFeeStr);
+
+  if (isNaN(newFee) || newFee < 0 || newFee > 100) {
+    return interaction.reply({ 
+      content: "Please enter a valid fee percentage between 0 and 100.", 
+      flags: MessageFlags.Ephemeral 
+    });
+  }
+
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    const guildId = interaction.guild.id;
+    const [existing] = await db.select().from(botConfig).where(eq(botConfig.guildId, guildId)).limit(1);
+
+    if (existing) {
+      await db.update(botConfig).set({
+        feePercent: newFee.toFixed(2),
+        updatedAt: new Date(),
+      }).where(eq(botConfig.guildId, guildId));
+    } else {
+      await db.insert(botConfig).values({
+        guildId,
+        feePercent: newFee.toFixed(2),
+      });
+    }
+
+    await refreshPublicEmbed(interaction.client, guildId);
+
+    await interaction.editReply({ 
+      content: `Service fee has been updated to **${newFee}%**. The public embed has been refreshed.` 
+    });
+
+    await logAction(null, interaction.user.id, "FEE_CHANGED", { newFee });
+  } catch (error) {
+    console.error("Admin fee modal error:", error);
+    await interaction.editReply({ content: "Something went wrong while updating the fee." });
+  }
+}
+
+async function handleAdminLimitsModal(interaction) {
+  if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+    return interaction.reply({ content: "You don't have permission to do this.", flags: MessageFlags.Ephemeral });
+  }
+
+  const minAmountStr = interaction.fields.getTextInputValue("min_amount").trim();
+  const maxAmountStr = interaction.fields.getTextInputValue("max_amount").trim();
+
+  let minAmount = null;
+  let maxAmount = null;
+
+  if (minAmountStr) {
+    minAmount = parseFloat(minAmountStr);
+    if (isNaN(minAmount) || minAmount < 0) {
+      return interaction.reply({ 
+        content: "Please enter a valid minimum amount (0 or greater).", 
+        flags: MessageFlags.Ephemeral 
+      });
+    }
+  }
+
+  if (maxAmountStr) {
+    maxAmount = parseFloat(maxAmountStr);
+    if (isNaN(maxAmount) || maxAmount < 0) {
+      return interaction.reply({ 
+        content: "Please enter a valid maximum amount (0 or greater).", 
+        flags: MessageFlags.Ephemeral 
+      });
+    }
+  }
+
+  if (minAmount !== null && maxAmount !== null && minAmount > maxAmount) {
+    return interaction.reply({ 
+      content: "Minimum amount cannot be greater than maximum amount.", 
+      flags: MessageFlags.Ephemeral 
+    });
+  }
+
+  try {
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+    const guildId = interaction.guild.id;
+    const [existing] = await db.select().from(botConfig).where(eq(botConfig.guildId, guildId)).limit(1);
+
+    const updateData = {
+      minTradeAmount: minAmount !== null ? minAmount.toFixed(2) : "0.00",
+      maxTradeAmount: maxAmount !== null ? maxAmount.toFixed(2) : null,
+      updatedAt: new Date(),
+    };
+
+    if (existing) {
+      await db.update(botConfig).set(updateData).where(eq(botConfig.guildId, guildId));
+    } else {
+      await db.insert(botConfig).values({
+        guildId,
+        ...updateData,
+      });
+    }
+
+    let message = "Trade limits updated!\n";
+    message += `**Minimum:** ${minAmount !== null && minAmount > 0 ? `$${minAmount.toFixed(2)}` : 'None'}\n`;
+    message += `**Maximum:** ${maxAmount !== null ? `$${maxAmount.toFixed(2)}` : 'Unlimited'}`;
+
+    await interaction.editReply({ content: message });
+
+    await logAction(null, interaction.user.id, "LIMITS_CHANGED", { minAmount, maxAmount });
+  } catch (error) {
+    console.error("Admin limits modal error:", error);
+    await interaction.editReply({ content: "Something went wrong while updating the limits." });
   }
 }

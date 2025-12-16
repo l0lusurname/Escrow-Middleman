@@ -6,6 +6,12 @@ import { formatAmount, parseAmount } from "../../utils/currencyParser.js";
 import { logAction } from "../../utils/auditLog.js";
 import { postOrUpdatePublicEmbed } from "../../ui/publicEmbed.js";
 import { minecraftBot } from "../../minecraft/mineflayer.js";
+import {
+  getGuildConfig,
+  getDailyStats,
+  createAdminPanelEmbed,
+  createAdminPanelButtons
+} from "../../ui/adminPanel.js";
 
 const OWNER_ID = process.env.OWNER_DISCORD_ID;
 
@@ -409,5 +415,62 @@ export async function handleSetVouchChannel(interaction) {
   } catch (error) {
     console.error("Set vouch channel error:", error);
     await interaction.editReply({ content: "An error occurred while setting the vouch channel." });
+  }
+}
+
+export async function handleSetFee(interaction) {
+  if (!checkAdmin(interaction)) {
+    return interaction.reply({ content: "You don't have permission to use this command.", ephemeral: true });
+  }
+
+  const newFee = interaction.options.getNumber("percent");
+  const guildId = interaction.guild.id;
+
+  try {
+    await interaction.deferReply({ ephemeral: true });
+
+    const [existing] = await db.select().from(botConfig).where(eq(botConfig.guildId, guildId)).limit(1);
+
+    if (existing) {
+      await db.update(botConfig).set({
+        feePercent: newFee.toFixed(2),
+        updatedAt: new Date(),
+      }).where(eq(botConfig.guildId, guildId));
+    } else {
+      await db.insert(botConfig).values({
+        guildId,
+        feePercent: newFee.toFixed(2),
+      });
+    }
+
+    await postOrUpdatePublicEmbed(interaction.client, guildId);
+    await logAction(null, interaction.user.id, "FEE_CHANGED", { newFee });
+
+    await interaction.editReply({ content: `Service fee has been updated to **${newFee}%**. The public embed has been refreshed.` });
+  } catch (error) {
+    console.error("Set fee error:", error);
+    await interaction.editReply({ content: "An error occurred while setting the fee." });
+  }
+}
+
+export async function handleAdminPanel(interaction) {
+  if (!checkAdmin(interaction)) {
+    return interaction.reply({ content: "You don't have permission to use this command.", ephemeral: true });
+  }
+
+  try {
+    await interaction.deferReply({ ephemeral: true });
+
+    const guildId = interaction.guild.id;
+    const stats = await getDailyStats(guildId);
+    const config = await getGuildConfig(guildId);
+
+    const embed = createAdminPanelEmbed(stats, config);
+    const buttons = createAdminPanelButtons();
+
+    await interaction.editReply({ embeds: [embed], components: buttons });
+  } catch (error) {
+    console.error("Admin panel error:", error);
+    await interaction.editReply({ content: "An error occurred while loading the admin panel." });
   }
 }

@@ -4,9 +4,8 @@ import { botConfig, trades } from "../db/schema.js";
 import { eq, desc, and, or, gte, sql } from "drizzle-orm";
 
 const BOT_MC_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
-const FEE_PERCENT = parseFloat(process.env.FEE_PERCENT) || 5.0;
 
-export function createPublicEmbed() {
+export function createPublicEmbed(feePercent = 5.0) {
   const embed = new EmbedBuilder()
     .setTitle("Donut SMP Middleman Service")
     .setColor(0xF5A623)
@@ -24,7 +23,7 @@ export function createPublicEmbed() {
     .addFields(
       {
         name: "Service Fee",
-        value: `**${FEE_PERCENT}%** of trade\n_(deducted from receiver)_`,
+        value: `**${feePercent}%** of trade\n_(deducted from receiver)_`,
         inline: true,
       },
       {
@@ -71,7 +70,8 @@ export async function postOrUpdatePublicEmbed(client, guildId) {
       return null;
     }
 
-    const embed = createPublicEmbed();
+    const feePercent = parseFloat(config.feePercent || "5.00");
+    const embed = createPublicEmbed(feePercent);
     const button = createStartButton();
 
     if (config.publicEmbedMessageId) {

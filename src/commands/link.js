@@ -160,6 +160,19 @@ export const data = new SlashCommandBuilder()
       .addStringOption((opt) =>
         opt.setName("amount").setDescription("Amount to pay (supports k/m/b suffixes)").setRequired(true)
       )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("panel")
+      .setDescription("Admin: Open the interactive admin control panel")
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName("set_fee")
+      .setDescription("Admin: Set the service fee percentage")
+      .addNumberOption((opt) =>
+        opt.setName("percent").setDescription("Fee percentage (e.g., 5 for 5%)").setRequired(true).setMinValue(0).setMaxValue(100)
+      )
   );
 
 export async function execute(interaction) {

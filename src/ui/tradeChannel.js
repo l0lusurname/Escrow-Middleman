@@ -17,7 +17,12 @@ import { formatAmount } from "../utils/currencyParser.js";
 import { logAction } from "../utils/auditLog.js";
 
 const BOT_MC_USERNAME = process.env.MINECRAFT_USERNAME || "Bunji_MC";
-const FEE_PERCENT = parseFloat(process.env.FEE_PERCENT) || 5.0;
+
+async function getGuildFeePercent(guildId) {
+  if (!guildId) return 5.0;
+  const [config] = await db.select().from(botConfig).where(eq(botConfig.guildId, guildId)).limit(1);
+  return parseFloat(config?.feePercent || "5.00");
+}
 
 function generateShortId() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -245,9 +250,9 @@ export function createAmountConfirmationButtons(tradeId) {
   );
 }
 
-export function createDealSummaryEmbed(trade) {
+export function createDealSummaryEmbed(trade, feePercent = 5.0) {
   const saleAmount = parseFloat(trade.saleAmount);
-  const feeAmount = saleAmount * (FEE_PERCENT / 100);
+  const feeAmount = saleAmount * (feePercent / 100);
   const receiverGets = saleAmount - feeAmount;
 
   const embed = new EmbedBuilder()
@@ -258,7 +263,7 @@ export function createDealSummaryEmbed(trade) {
       { name: "Sender", value: `<@${trade.sellerDiscordId}>`, inline: true },
       { name: "Receiver", value: `<@${trade.buyerDiscordId}>`, inline: true },
       { name: "Trade Value", value: `**$${formatPayAmount(saleAmount)}**`, inline: true },
-      { name: "Service Fee", value: `$${formatPayAmount(feeAmount)} (${FEE_PERCENT}%)`, inline: true },
+      { name: "Service Fee", value: `$${formatPayAmount(feeAmount)} (${feePercent}%)`, inline: true },
       { name: "Receiver Gets", value: `**$${formatPayAmount(receiverGets)}**`, inline: true }
     );
 
@@ -354,9 +359,9 @@ export function createReleaseButtons(tradeId) {
   );
 }
 
-export function createReleaseConfirmationEmbed(trade) {
+export function createReleaseConfirmationEmbed(trade, feePercent = 5.0) {
   const saleAmount = parseFloat(trade.saleAmount);
-  const feeAmount = saleAmount * (FEE_PERCENT / 100);
+  const feeAmount = saleAmount * (feePercent / 100);
   const receiverGets = saleAmount - feeAmount;
 
   const embed = new EmbedBuilder()

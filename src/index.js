@@ -17,13 +17,14 @@ import {
   handlePostEmbed,
   handlePay,
   handleSetVouchChannel,
+  handleSetFee,
+  handleAdminPanel,
 } from "./commands/handlers/adminCommands.js";
 import { handleButtonInteraction } from "./events/buttonHandler.js";
 import { handleModalSubmit, handlePartnerMention, handleAmountMessage } from "./events/modalHandler.js";
 import { createWebhookRouter } from "./webhook/paymentWebhook.js";
 import { minecraftBot } from "./minecraft/mineflayer.js";
 import { createPaymentHandler } from "./minecraft/paymentHandler.js";
-import { getDailyStats, createAdminPanelEmbed } from "./ui/publicEmbed.js";
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.DISCORD_CLIENT_ID;
@@ -150,20 +151,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
             await handlePostEmbed(interaction);
             break;
           case "stats":
-            if (!interaction.member.permissions.has("Administrator")) {
-              await interaction.reply({ content: "Admin only.", ephemeral: true });
-              break;
-            }
-            await interaction.deferReply({ ephemeral: true });
-            const stats = await getDailyStats(interaction.guild.id);
-            const statsEmbed = createAdminPanelEmbed(stats);
-            await interaction.editReply({ embeds: [statsEmbed] });
+          case "panel":
+            await handleAdminPanel(interaction);
             break;
           case "pay":
             await handlePay(interaction);
             break;
           case "set_vouch_channel":
             await handleSetVouchChannel(interaction);
+            break;
+          case "set_fee":
+            await handleSetFee(interaction);
             break;
           default:
             await interaction.reply({ content: "Unknown subcommand.", ephemeral: true });
