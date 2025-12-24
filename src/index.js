@@ -366,7 +366,7 @@ app.get('/health', (req, res) => {
   })
 })
 
-app.post('/webhooks', (req, res) => {
+app.post('/webhooks', async (req, res) => {
   try {
     console.log('🔔 Webhook received:', req.body?.event || '<no event>', `id: ${req.body?.data?.id || 'N/A'}`)
 
@@ -517,7 +517,8 @@ app.post('/webhooks', (req, res) => {
 
   } catch (err) {
     console.error('❌ Webhook error:', err.message)
-    res.status(500).json({ error: 'Internal server error' })
+    console.error('Stack:', err.stack)
+    res.status(500).json({ error: 'Internal server error', message: err.message })
   }
 })
 
