@@ -366,7 +366,7 @@ app.get('/health', (req, res) => {
   })
 })
 
-app.post('/webhook', (req, res) => {
+app.post('/webhooks', (req, res) => {
   try {
     console.log('🔔 Webhook received:', req.body?.event || '<no event>', `id: ${req.body?.data?.id || 'N/A'}`)
 
@@ -462,10 +462,58 @@ app.post('/webhook', (req, res) => {
         success: true, 
         message: `Payment of ${amount}m will be sent to ${inGameName}` 
       })
-    } else {
-      console.log(`ℹ️ Received webhook event: ${event} (ignored)`)
-      res.json({ success: true, message: 'Event ignored' })
+      return
     }
+
+    // Dynamic Delivery webhook
+    if (event === 'INVOICE.ITEM.DELIVER-DYNAMIC') {
+      console.log(`\n🚀 Dynamic Delivery requested for item #${req.body.item?.id}`)
+      
+      let inGameName = null
+      if (req.body.item?.custom_fields) {
+        // Try to find the in-game name in custom_fields (object format)
+        if (typeof req.body.item.custom_fields === 'object' && !Array.isArray(req.body.item.custom_fields)) {
+          inGameName = req.body.item.custom_fields[CUSTOM_FIELD_NAME]
+        } else if (Array.isArray(req.body.item.custom_fields)) {
+          const nameField = req.body.item.custom_fields.find(f => f.name === CUSTOM_FIELD_NAME)
+          if (nameField) inGameName = nameField.value
+        }
+      }
+
+      if (!inGameName) {
+        console.error(`❌ Dynamic delivery for item ${req.body.item?.id}: Missing in-game name`)
+        res.statusCode = 200
+        res.setHeader('Content-Type', 'text/plain')
+        return res.end('ERROR: Missing in-game name')
+      }
+
+      // Parse amount from product/variant name or use quantity
+      let amount = req.body.item?.quantity || 1
+      const variantName = req.body.item?.variant?.name || ''
+      const productName = req.body.item?.product?.name || ''
+      const fullName = (variantName || productName).toString()
+      
+      const match = fullName.match(/(\d+(?:\.\d+)?)(?:\s*(m|million))\b/i)
+      if (match) {
+        amount = parseFloat(match[1])
+      }
+
+      console.log(`📦 Dynamic Delivery details:`)
+      console.log(`   - Player: ${inGameName}`)
+      console.log(`   - Amount: ${amount}m`)
+      console.log(`   - Product: ${productName}`)
+      console.log(`   - Email: ${req.body.email || 'N/A'}`)
+
+      executePayment(inGameName, amount)
+
+      // Return 200 OK with confirmation (plain text for SellAuth)
+      res.statusCode = 200
+      res.setHeader('Content-Type', 'text/plain')
+      return res.end(`SUCCESS: Delivered ${amount}m to ${inGameName}`)
+    }
+
+    console.log(`ℹ️ Received webhook event: ${event} (ignored)`)
+    res.json({ success: true, message: 'Event ignored' })
 
   } catch (err) {
     console.error('❌ Webhook error:', err.message)
