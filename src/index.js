@@ -547,13 +547,6 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error', message: err.message })
 })
 
-app.listen(WEBHOOK_PORT, () => {
-  console.log(`\n🚀 Webhook server started`)
-  console.log(`📍 Listening on: http://localhost:${WEBHOOK_PORT}`)
-  console.log(`🔗 Webhook URL: http://your-domain.com:${WEBHOOK_PORT}/webhook`)
-  console.log(`💡 Set this URL in SellAuth Dashboard > Settings > Developers\n`)
-})
-
 // ============ PROCESS HANDLERS ============
 process.on('SIGINT', () => {
   console.log('\n👋 Shutting down gracefully...')
@@ -593,4 +586,14 @@ console.log('🎮 Starting SellAuth + Minecraft Integration...')
 console.log(`📍 Minecraft: ${MC_HOST}:${MC_PORT}`)
 console.log(`👤 Username: ${MC_USERNAME}`)
 console.log(`🔐 Auth: ${MC_AUTH}`)
-startBot()
+
+// Start webhook server first
+const server = app.listen(WEBHOOK_PORT, () => {
+  console.log(`\n🚀 Webhook server started`)
+  console.log(`📍 Listening on: http://localhost:${WEBHOOK_PORT}`)
+  console.log(`🔗 Webhook URL: https://escrow-middleman-production.up.railway.app/webhooks`)
+  console.log(`💡 Set this URL in SellAuth Dashboard > Settings > Developers\n`)
+  
+  // Then start bot connection (doesn't block the server)
+  startBot()
+})
