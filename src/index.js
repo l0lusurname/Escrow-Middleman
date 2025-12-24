@@ -13,7 +13,7 @@ const MC_PASSWORD = process.env.MC_PASSWORD
 const MC_AUTH = process.env.MC_AUTH || 'microsoft'
 const MC_VERSION = process.env.MC_VERSION || false
 
-const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || '3000')
+const WEBHOOK_PORT = parseInt(process.env.PORT || process.env.WEBHOOK_PORT || '3000')
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET // Optional - for webhook verification
 const CUSTOM_FIELD_NAME = process.env.CUSTOM_FIELD_NAME || 'In game name'
 
