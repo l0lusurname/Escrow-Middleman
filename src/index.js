@@ -539,6 +539,13 @@ app.post('/update-stock', async (req, res) => {
   }
 })
 
+// Global error handler for Express
+app.use((err, req, res, next) => {
+  console.error('❌ Express error:', err.message)
+  console.error(err.stack)
+  res.status(500).json({ error: 'Internal server error', message: err.message })
+})
+
 app.listen(WEBHOOK_PORT, () => {
   console.log(`\n🚀 Webhook server started`)
   console.log(`📍 Listening on: http://localhost:${WEBHOOK_PORT}`)
@@ -573,6 +580,11 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (err) => {
   console.error('❌ Unhandled rejection:', err.message)
   console.log('🔄 Attempting to recover...')
+})
+
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught exception:', err.message)
+  console.error(err.stack)
 })
 
 // ============ START ============
