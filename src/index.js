@@ -588,9 +588,9 @@ console.log(`👤 Username: ${MC_USERNAME}`)
 console.log(`🔐 Auth: ${MC_AUTH}`)
 
 // Start webhook server first
-const server = app.listen(WEBHOOK_PORT, () => {
+const server = app.listen(WEBHOOK_PORT, '0.0.0.0', () => {
   console.log(`\n🚀 Webhook server started`)
-  console.log(`📍 Listening on: http://localhost:${WEBHOOK_PORT}`)
+  console.log(`📍 Listening on: 0.0.0.0:${WEBHOOK_PORT}`)
   console.log(`🔗 Webhook URL: https://escrow-middleman-production.up.railway.app/webhooks`)
   console.log(`💡 Set this URL in SellAuth Dashboard > Settings > Developers\n`)
   
