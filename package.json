@@ -1,24 +1,24 @@
 {
-  "name": "donut-smp-escrow-bot",
+  "name": "sellauth-minecraft-bot",
   "version": "1.0.0",
-  "description": "Discord Escrow/Middleman Bot for Donut SMP Minecraft trades",
+  "description": "SellAuth webhook integration with Minecraft bot - auto payments and stock updates",
   "type": "module",
-  "main": "src/index.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
-    "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "start": "node index.js",
+    "dev": "node --watch index.js"
   },
   "dependencies": {
-    "discord.js": "^14.25.1",
-    "dotenv": "^16.6.1",
-    "drizzle-orm": "^0.45.1",
-    "express": "^4.22.1",
-    "mineflayer": "^4.25.0",
-    "pg": "^8.16.3"
+    "mineflayer": "^4.20.1",
+    "express": "^4.18.2"
   },
-  "devDependencies": {
-    "drizzle-kit": "^0.31.8"
-  }
+  "keywords": [
+    "minecraft",
+    "bot",
+    "sellauth",
+    "webhook",
+    "economy"
+  ],
+  "author": "",
+  "license": "MIT"
 }
