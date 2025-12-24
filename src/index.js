@@ -594,6 +594,6 @@ const server = app.listen(WEBHOOK_PORT, () => {
   console.log(`🔗 Webhook URL: https://escrow-middleman-production.up.railway.app/webhooks`)
   console.log(`💡 Set this URL in SellAuth Dashboard > Settings > Developers\n`)
   
-  // Then start bot connection (doesn't block the server)
-  startBot()
+  // Start bot connection asynchronously (doesn't block the server)
+  setImmediate(() => startBot())
 })
