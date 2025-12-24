@@ -3,7 +3,7 @@
 
 import mineflayer from 'mineflayer'
 import express from 'express'
-import crypto from 'crypto'
+import { verifyHmac } from './utils/hmac.js'
 
 // ============ CONFIGURATION ============
 const MC_HOST = process.env.MC_HOST || 'donutsmp.net'
@@ -48,6 +48,7 @@ let reconnectTimeout = null
 let teamHomeInterval = null
 let stockUpdateInterval = null
 const pendingPayments = []
+const recentWebhooks = [] // Store recent webhook events for debugging
 let currentBalance = 0 // Store current in-game balance
 
 // ============ SELLAUTH API FUNCTIONS ============
@@ -318,6 +319,7 @@ function executePayment(username, amount) {
   if (!bot || !bot.entity) {
     console.warn(`⚠️ Bot offline, queuing payment: ${amount}m to ${username}`)
     pendingPayments.push({ username, amount })
+    console.log(`📌 Payment queued. Pending payments: ${pendingPayments.length}`)
     return
   }
 
@@ -346,7 +348,11 @@ function processPendingPayments() {
 // ============ WEBHOOK SERVER ============
 const app = express()
 
-app.use(express.json())
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf ? buf.toString() : ''
+  }
+}))
 
 app.get('/health', (req, res) => {
   res.json({
@@ -355,24 +361,30 @@ app.get('/health', (req, res) => {
     pendingPayments: pendingPayments.length,
     currentBalance: `${currentBalance.toFixed(2)}m`,
     currentStock: calculateStockFromBalance(currentBalance),
-    stockAutoUpdate: SELLAUTH_API_KEY ? 'enabled' : 'disabled'
+    stockAutoUpdate: SELLAUTH_API_KEY ? 'enabled' : 'disabled',
+    recentWebhooks: recentWebhooks.slice(0,10).map(e => ({ timestamp: e.timestamp, event: e.event, id: e.id }))
   })
 })
 
 app.post('/webhook', (req, res) => {
   try {
+    console.log('🔔 Webhook received:', req.body?.event || '<no event>', `id: ${req.body?.data?.id || 'N/A'}`)
+
+    // Record for debugging
+    recentWebhooks.unshift({ timestamp: Date.now(), event: req.body?.event, id: req.body?.data?.id, raw: (req.rawBody || JSON.stringify(req.body)).slice(0,200) })
+    if (recentWebhooks.length > 20) recentWebhooks.pop()
+
     // Verify webhook signature if secret is provided
     if (WEBHOOK_SECRET) {
-      const signature = req.headers['signature']
+      const signature = req.headers['x-hmac-signature'] || req.headers['x-sellauth-signature'] || req.headers['x-signature'] || req.headers['signature']
       if (!signature) {
-        console.warn('⚠️ Webhook received without signature - rejected')
+        console.warn('⚠️ Webhook received without signature header - rejected')
+        console.warn('   Available headers:', Object.keys(req.headers).join(', '))
         return res.status(403).json({ error: 'No signature provided' })
       }
 
-      const payload = JSON.stringify(req.body)
-      const hash = crypto.createHmac('sha256', WEBHOOK_SECRET).update(payload).digest('hex')
-
-      if (hash !== signature) {
+      const raw = req.rawBody || JSON.stringify(req.body)
+      if (!verifyHmac(raw, signature, WEBHOOK_SECRET)) {
         console.warn('⚠️ Webhook signature verification failed - rejected')
         return res.status(403).json({ error: 'Invalid signature' })
       }
@@ -402,17 +414,16 @@ app.post('/webhook', (req, res) => {
       }
 
       let amount = 1
-      
-      if (data.variant_name) {
-        const match = data.variant_name.match(/(\d+)m/i)
-        if (match) {
-          amount = parseInt(match[1])
-        }
-      } else if (data.product_name) {
-        const match = data.product_name.match(/(\d+)m/i)
-        if (match) {
-          amount = parseInt(match[1])
-        }
+
+      const nameToParse = (data.variant_name || data.product_name || '').toString()
+      // Match patterns like '1m', '1 M', '1 million', '1.5m'
+      const match = nameToParse.match(/(\d+(?:\.\d+)?)(?:\s*(m|million))\b/i)
+      if (match) {
+        amount = parseFloat(match[1])
+      } else {
+        // Fallback: try shorthand like '1M' or '5m'
+        const match2 = nameToParse.match(/(\d+(?:\.\d+)?)[\s-]*m\b/i)
+        if (match2) amount = parseFloat(match2[1])
       }
 
       if (data.quantity && data.quantity > 1) {
@@ -426,6 +437,26 @@ app.post('/webhook', (req, res) => {
       console.log(`   - Email: ${data.email || 'N/A'}`)
 
       executePayment(inGameName, amount)
+
+      // Auto-process the invoice in SellAuth
+      if (SELLAUTH_API_KEY && SELLAUTH_SHOP_ID && data.id) {
+        const invoiceId = data.id
+        const processUrl = `https://api.sellauth.com/v1/shops/${SELLAUTH_SHOP_ID}/invoices/${invoiceId}/process`
+        
+        fetch(processUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${SELLAUTH_API_KEY}`
+          }
+        })
+        .then(res => res.json())
+        .then(result => {
+          console.log(`✅ SellAuth invoice ${invoiceId} marked as processed`)
+        })
+        .catch(err => {
+          console.error(`❌ Failed to process invoice in SellAuth:`, err.message)
+        })
+      }
 
       res.json({ 
         success: true, 
