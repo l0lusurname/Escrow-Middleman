@@ -1,9 +1,9 @@
 // Complete SellAuth + Minecraft Bot Integration
 // Listens for SellAuth webhooks, executes /pay commands, and auto-updates stock
 
-const mineflayer = require('mineflayer')
-const express = require('express')
-const crypto = require('crypto')
+import mineflayer from 'mineflayer'
+import express from 'express'
+import crypto from 'crypto'
 
 // ============ CONFIGURATION ============
 const MC_HOST = process.env.MC_HOST || 'donutsmp.net'
@@ -58,24 +58,45 @@ async function updateSellAuthStock(stockAmount) {
   }
 
   try {
-    const url = SELLAUTH_VARIANT_ID 
-      ? `https://api.sellauth.com/v1/shops/${SELLAUTH_SHOP_ID}/products/${SELLAUTH_PRODUCT_ID}/stock/${SELLAUTH_VARIANT_ID}`
-      : `https://api.sellauth.com/v1/shops/${SELLAUTH_SHOP_ID}/products/${SELLAUTH_PRODUCT_ID}/stock`
+    // For "service" or "dynamic" deliverables_type: PUT /stock/{variantId}
+    // For "serials" deliverables_type: Must update deliverables directly
+    
+    let url, method, body
+    
+    if (SELLAUTH_VARIANT_ID) {
+      // If variant ID is provided, use the stock endpoint (for service/dynamic products)
+      url = `https://api.sellauth.com/v1/shops/${SELLAUTH_SHOP_ID}/products/${SELLAUTH_PRODUCT_ID}/stock/${SELLAUTH_VARIANT_ID}`
+      method = 'PUT'
+      body = JSON.stringify({ stock: stockAmount })
+    } else {
+      // If no variant, update stock on the product itself (for service/dynamic)
+      url = `https://api.sellauth.com/v1/shops/${SELLAUTH_SHOP_ID}/products/${SELLAUTH_PRODUCT_ID}/stock`
+      method = 'PUT'
+      body = JSON.stringify({ stock: stockAmount })
+    }
 
     const response = await fetch(url, {
-      method: 'PUT',
+      method: method,
       headers: {
         'Authorization': `Bearer ${SELLAUTH_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        stock: stockAmount
-      })
+      body: body
     })
 
     if (!response.ok) {
       const error = await response.text()
-      console.error(`❌ Failed to update SellAuth stock: ${response.status} ${error}`)
+      console.error(`❌ Failed to update SellAuth stock: ${response.status}`)
+      console.error(`   URL: ${url}`)
+      console.error(`   Response: ${error}`)
+      
+      // Check if it's a 405 error - means wrong product type
+      if (response.status === 405) {
+        console.error(`   ⚠️ Stock API only works for "service" or "dynamic" deliverables_type`)
+        console.error(`   ⚠️ If your product uses "serials", you cannot use the stock API`)
+        console.error(`   ⚠️ For serials, you must manage deliverables directly`)
+      }
+      
       return false
     }
 
