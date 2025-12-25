@@ -4,6 +4,7 @@
 import mineflayer from 'mineflayer'
 import express from 'express'
 import { verifyHmac } from './utils/hmac.js'
+import { startSellAuthPoller, stopSellAuthPoller } from './services/sellauthPoller.js'
 
 // ============ CONFIGURATION ============
 const MC_HOST = process.env.MC_HOST || 'donutsmp.net'
@@ -48,6 +49,7 @@ let reconnectTimeout = null
 let teamHomeInterval = null
 let stockUpdateInterval = null
 const pendingPayments = []
+const pendingCoinPayments = [] // Pending payments in raw coins (integer coins, not 'm')
 const recentWebhooks = [] // Store recent webhook events for debugging
 let currentBalance = 0 // Store current in-game balance
 
@@ -201,6 +203,9 @@ function startBot() {
 
     // Process any pending payments
     processPendingPayments()
+
+    // Process pending raw coin payments (from SellAuth poller)
+    processPendingCoinPayments()
   })
 
   // Listen for chat messages to parse balance
@@ -331,6 +336,48 @@ function executePayment(username, amount) {
   setTimeout(() => {
     checkBalance()
   }, 3000)
+}
+
+// Execute payment in raw coins (integer amount, e.g. 1000000), used by SellAuth poller
+function executePaymentCoins(username, coins) {
+  return new Promise((resolve, reject) => {
+    if (!bot || !bot.entity) {
+      console.warn(`⚠️ Bot offline, cannot execute coin payment: ${coins} to ${username}`)
+      // Queue this payment to try later
+      pendingCoinPayments.push({ username, coins })
+      return reject(new Error('Bot offline'))
+    }
+
+    const command = `/pay ${username} ${coins}`
+    try {
+      console.log(`💸 Executing coin payment: ${command}`)
+      bot.chat(command)
+      // We optimistically assume the command was issued successfully.
+      // If you want to verify on-chat responses, add listeners and correlate.
+      setTimeout(() => {
+        // Trigger a balance check shortly after to refresh stock
+        checkBalance()
+      }, 3000)
+      resolve()
+    } catch (err) {
+      reject(err)
+    }
+  })
+}
+
+function processPendingCoinPayments() {
+  if (pendingCoinPayments.length === 0) return
+  console.log(`📋 Processing ${pendingCoinPayments.length} pending coin payment(s)...`)
+  while (pendingCoinPayments.length > 0) {
+    const p = pendingCoinPayments.shift()
+    executePaymentCoins(p.username, p.coins)
+      .then(() => console.log(`✅ Pending coin payment sent: ${p.username} +${p.coins}`))
+      .catch(err => {
+        console.error(`❌ Failed to send pending coin payment to ${p.username}:`, err.message || err)
+        // If it failed due to offline, push back onto queue for later
+        pendingCoinPayments.push(p)
+      })
+  }
 }
 
 function processPendingPayments() {
@@ -553,6 +600,7 @@ process.on('SIGINT', () => {
   clearIntervals()
   if (reconnectTimeout) clearTimeout(reconnectTimeout)
   if (bot) bot.quit()
+  try { stopSellAuthPoller() } catch(e) {}
   process.exit(0)
 })
 
@@ -561,6 +609,7 @@ process.on('SIGTERM', () => {
   clearIntervals()
   if (reconnectTimeout) clearTimeout(reconnectTimeout)
   if (bot) bot.quit()
+  try { stopSellAuthPoller() } catch(e) {}
   process.exit(0)
 })
 
@@ -596,4 +645,7 @@ const server = app.listen(WEBHOOK_PORT, '0.0.0.0', () => {
   
   // Start bot connection asynchronously (doesn't block the server)
   setImmediate(() => startBot())
+
+  // Start SellAuth poller to auto-pay completed invoices
+  setImmediate(() => startSellAuthPoller({ doPayment: executePaymentCoins }))
 })
