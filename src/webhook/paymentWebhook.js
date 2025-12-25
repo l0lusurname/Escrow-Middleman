@@ -2,7 +2,7 @@ import express from "express";
 import { db } from "../db/index.js";
 import { trades, verifications, linkedAccounts, botConfig } from "../db/schema.js";
 import { eq, and, or } from "drizzle-orm";
-import { verifyHmac } from "../utils/hmac.js";
+import { verifyHmacDetailed } from "../utils/hmac.js";
 import { parseAmount, formatAmount, amountsMatch } from "../utils/currencyParser.js";
 import { logAction } from "../utils/auditLog.js";
 
@@ -27,7 +27,11 @@ export function createWebhookRouter(discordClient) {
       }
 
       try {
-        if (!verifyHmac(req.body, signature, config.webhookSecret)) {
+        const payload = req.rawBody || (req.body ? JSON.stringify(req.body) : '')
+        const result = verifyHmacDetailed(payload, signature, config.webhookSecret)
+        if (!result.ok) {
+          const mask = s => s ? `${s.slice(0,6)}...${s.slice(-6)} (len=${s.length})` : '<none>'
+          console.warn(`⚠️ Webhook signature verification failed. Provided: ${mask(signature)}; Expected(hex): ${mask(result.expectedHex)}; reason: ${result.reason}`)
           return res.status(401).json({ error: "Invalid signature" });
         }
       } catch (e) {
@@ -179,7 +183,11 @@ export function createWebhookRouter(discordClient) {
       }
 
       try {
-        if (!verifyHmac(req.body, signature, config.webhookSecret)) {
+        const payload = req.rawBody || (req.body ? JSON.stringify(req.body) : '')
+        const result = verifyHmacDetailed(payload, signature, config.webhookSecret)
+        if (!result.ok) {
+          const mask = s => s ? `${s.slice(0,6)}...${s.slice(-6)} (len=${s.length})` : '<none>'
+          console.warn(`⚠️ Webhook signature verification failed. Provided: ${mask(signature)}; Expected(hex): ${mask(result.expectedHex)}; reason: ${result.reason}`)
           return res.status(401).json({ error: "Invalid signature" });
         }
       } catch (e) {

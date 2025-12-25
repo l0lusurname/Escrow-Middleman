@@ -4,6 +4,7 @@
 import mineflayer from 'mineflayer'
 import express from 'express'
 import crypto from 'crypto'
+import { verifyHmacDetailed } from './utils/hmac.js'
 
 // ============ CONFIGURATION ============
 const MC_HOST = process.env.MC_HOST || 'donutsmp.net'
@@ -308,6 +309,22 @@ app.get('/health', (req, res) => {
   })
 })
 
+// Debug endpoint to help inspect expected HMAC signatures (ENABLE ONLY FOR TESTING)
+if (process.env.SELLAUTH_DEBUG_SIGNATURES === 'true') {
+  app.post('/debug/signature', (req, res) => {
+    try {
+      const which = req.query.for === 'dynamic' ? 'dynamic' : 'webhook'
+      const secret = which === 'dynamic' ? DYNAMIC_DELIVERY_SECRET : WEBHOOK_SECRET
+      if (!secret) return res.status(400).json({ error: `Secret not configured for ${which}` })
+      const payload = req.rawBody || (req.body ? JSON.stringify(req.body) : '')
+      const result = verifyHmacDetailed(payload, 'dummy', secret)
+      return res.json({ which, expectedHex: result.expectedHex, expectedBase64: result.expectedBase64 })
+    } catch (err) {
+      return res.status(500).json({ error: err.message })
+    }
+  })
+}
+
 // Dynamic Delivery Webhook (for products with "dynamic" deliverable type)
 app.post('/dynamic-delivery', (req, res) => {
   try {
@@ -315,17 +332,21 @@ app.post('/dynamic-delivery', (req, res) => {
 
     // Verify signature if secret is provided
     if (DYNAMIC_DELIVERY_SECRET) {
-      const signature = req.headers['x-signature']
+      const signature = req.headers['x-sellauth-signature'] || req.headers['x-hmac-signature'] || req.headers['x-signature'] || req.headers['signature'] || req.headers['x-sellauth-signature']
       if (!signature) {
-        console.warn('⚠️ No X-Signature header - rejected')
+        console.warn('⚠️ No signature header - rejected')
+        console.warn('   Available headers:', Object.keys(req.headers).join(', '))
         return res.status(403).send('Missing signature')
       }
 
-      const payload = JSON.stringify(req.body)
-      const hash = crypto.createHmac('sha256', DYNAMIC_DELIVERY_SECRET).update(payload).digest('hex')
-
-      if (hash !== signature) {
-        console.warn('⚠️ Signature verification failed - rejected')
+      const payload = req.rawBody || (req.body ? JSON.stringify(req.body) : '')
+      const result = verifyHmacDetailed(payload, signature, DYNAMIC_DELIVERY_SECRET)
+      if (!result.ok) {
+        const mask = s => s ? `${s.slice(0,6)}...${s.slice(-6)} (len=${s.length})` : '<none>'
+        console.warn(`⚠️ Signature verification failed - rejected. Provided: ${mask(signature)}; Expected(hex): ${mask(result.expectedHex)}; reason: ${result.reason}`)
+        if (process.env.SELLAUTH_DEBUG_SIGNATURES === 'true') {
+          return res.status(403).json({ error: 'Invalid signature', provided: signature, expectedHex: result.expectedHex, expectedBase64: result.expectedBase64 })
+        }
         return res.status(403).send('Invalid signature')
       }
     }
@@ -390,17 +411,21 @@ app.post('/dynamic-delivery', (req, res) => {
 app.post('/webhook', (req, res) => {
   try {
     if (WEBHOOK_SECRET) {
-      const signature = req.headers['signature']
+      const signature = req.headers['x-hmac-signature'] || req.headers['x-sellauth-signature'] || req.headers['x-signature'] || req.headers['signature'] || req.headers['x-signature']
       if (!signature) {
         console.warn('⚠️ Webhook without signature - rejected')
+        console.warn('   Available headers:', Object.keys(req.headers).join(', '))
         return res.status(403).json({ error: 'No signature provided' })
       }
 
-      const payload = JSON.stringify(req.body)
-      const hash = crypto.createHmac('sha256', WEBHOOK_SECRET).update(payload).digest('hex')
-
-      if (hash !== signature) {
-        console.warn('⚠️ Webhook signature verification failed')
+      const payload = req.rawBody || (req.body ? JSON.stringify(req.body) : '')
+      const result = verifyHmacDetailed(payload, signature, WEBHOOK_SECRET)
+      if (!result.ok) {
+        const mask = s => s ? `${s.slice(0,6)}...${s.slice(-6)} (len=${s.length})` : '<none>'
+        console.warn(`⚠️ Webhook signature verification failed. Provided: ${mask(signature)}; Expected(hex): ${mask(result.expectedHex)}; reason: ${result.reason}`)
+        if (process.env.SELLAUTH_DEBUG_SIGNATURES === 'true') {
+          return res.status(403).json({ error: 'Invalid signature', provided: signature, expectedHex: result.expectedHex, expectedBase64: result.expectedBase64 })
+        }
         return res.status(403).json({ error: 'Invalid signature' })
       }
     }
