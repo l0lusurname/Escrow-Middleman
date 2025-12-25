@@ -1,10 +1,9 @@
 // Complete SellAuth + Minecraft Bot Integration
-// Listens for SellAuth webhooks, executes /pay commands, and auto-updates stock
+// Handles both order webhooks AND dynamic delivery webhooks
 
 import mineflayer from 'mineflayer'
 import express from 'express'
-import { verifyHmac } from './utils/hmac.js'
-import { startSellAuthPoller, stopSellAuthPoller } from './services/sellauthPoller.js'
+import crypto from 'crypto'
 
 // ============ CONFIGURATION ============
 const MC_HOST = process.env.MC_HOST || 'donutsmp.net'
@@ -14,15 +13,15 @@ const MC_PASSWORD = process.env.MC_PASSWORD
 const MC_AUTH = process.env.MC_AUTH || 'microsoft'
 const MC_VERSION = process.env.MC_VERSION || false
 
-const WEBHOOK_PORT = parseInt(process.env.PORT || process.env.WEBHOOK_PORT || '3000')
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET // Optional - for webhook verification
+const WEBHOOK_PORT = parseInt(process.env.WEBHOOK_PORT || '3000')
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET // Optional - for order webhooks
+const DYNAMIC_DELIVERY_SECRET = process.env.DYNAMIC_DELIVERY_SECRET // For dynamic delivery
 const CUSTOM_FIELD_NAME = process.env.CUSTOM_FIELD_NAME || 'In game name'
 
 // SellAuth API Configuration
 const SELLAUTH_API_KEY = process.env.SELLAUTH_API_KEY
 const SELLAUTH_SHOP_ID = process.env.SELLAUTH_SHOP_ID
-const SELLAUTH_PRODUCT_ID = process.env.SELLAUTH_PRODUCT_ID // Product ID for "$1 Milion Donutsmp"
-const SELLAUTH_VARIANT_ID = process.env.SELLAUTH_VARIANT_ID // Optional - if using variants
+const SELLAUTH_PRODUCT_ID = process.env.SELLAUTH_PRODUCT_ID
 
 // Stock update interval (default: 5 minutes)
 const STOCK_UPDATE_INTERVAL = parseInt(process.env.STOCK_UPDATE_INTERVAL || '300000')
@@ -33,13 +32,9 @@ if (!MC_USERNAME) {
   process.exit(1)
 }
 
-if (!SELLAUTH_API_KEY) {
-  console.warn('⚠️ Missing SELLAUTH_API_KEY - stock auto-update will be disabled')
-  console.warn('💡 Get your API key from: Dashboard > Account > API')
-}
-
-if (!SELLAUTH_SHOP_ID || !SELLAUTH_PRODUCT_ID) {
-  console.warn('⚠️ Missing SELLAUTH_SHOP_ID or SELLAUTH_PRODUCT_ID - stock auto-update will be disabled')
+if (!DYNAMIC_DELIVERY_SECRET) {
+  console.warn('⚠️ Missing DYNAMIC_DELIVERY_SECRET - dynamic delivery verification disabled')
+  console.warn('💡 Get it from: Storefront > Configure > Miscellaneous')
 }
 
 // ============ GLOBAL STATE ============
@@ -49,72 +44,44 @@ let reconnectTimeout = null
 let teamHomeInterval = null
 let stockUpdateInterval = null
 const pendingPayments = []
-const pendingCoinPayments = [] // Pending payments in raw coins (integer coins, not 'm')
-const recentWebhooks = [] // Store recent webhook events for debugging
-let currentBalance = 0 // Store current in-game balance
+let currentBalance = 0
 
 // ============ SELLAUTH API FUNCTIONS ============
 async function updateSellAuthStock(stockAmount) {
   if (!SELLAUTH_API_KEY || !SELLAUTH_SHOP_ID || !SELLAUTH_PRODUCT_ID) {
-    console.warn('⚠️ SellAuth credentials not configured, skipping stock update')
     return false
   }
 
   try {
-    // For "service" or "dynamic" deliverables_type: PUT /stock/{variantId}
-    // For "serials" deliverables_type: Must update deliverables directly
-    
-    let url, method, body
-    
-    if (SELLAUTH_VARIANT_ID) {
-      // If variant ID is provided, use the stock endpoint (for service/dynamic products)
-      url = `https://api.sellauth.com/v1/shops/${SELLAUTH_SHOP_ID}/products/${SELLAUTH_PRODUCT_ID}/stock/${SELLAUTH_VARIANT_ID}`
-      method = 'PUT'
-      body = JSON.stringify({ stock: stockAmount })
-    } else {
-      // If no variant, update stock on the product itself (for service/dynamic)
-      url = `https://api.sellauth.com/v1/shops/${SELLAUTH_SHOP_ID}/products/${SELLAUTH_PRODUCT_ID}/stock`
-      method = 'PUT'
-      body = JSON.stringify({ stock: stockAmount })
-    }
+    const url = `https://api.sellauth.com/v1/shops/${SELLAUTH_SHOP_ID}/products/${SELLAUTH_PRODUCT_ID}/stock`
 
     const response = await fetch(url, {
-      method: method,
+      method: 'PUT',
       headers: {
         'Authorization': `Bearer ${SELLAUTH_API_KEY}`,
         'Content-Type': 'application/json'
       },
-      body: body
+      body: JSON.stringify({ stock: stockAmount })
     })
 
     if (!response.ok) {
       const error = await response.text()
-      console.error(`❌ Failed to update SellAuth stock: ${response.status}`)
-      console.error(`   URL: ${url}`)
-      console.error(`   Response: ${error}`)
-      
-      // Check if it's a 405 error - means wrong product type
+      console.error(`❌ Failed to update stock: ${response.status}`)
       if (response.status === 405) {
-        console.error(`   ⚠️ Stock API only works for "service" or "dynamic" deliverables_type`)
-        console.error(`   ⚠️ If your product uses "serials", you cannot use the stock API`)
-        console.error(`   ⚠️ For serials, you must manage deliverables directly`)
+        console.error(`   ⚠️ Make sure product deliverable type is "service" or "dynamic"`)
       }
-      
       return false
     }
 
     console.log(`✅ SellAuth stock updated: ${stockAmount} units`)
     return true
   } catch (err) {
-    console.error('❌ Error updating SellAuth stock:', err.message)
+    console.error('❌ Error updating stock:', err.message)
     return false
   }
 }
 
 function calculateStockFromBalance(balanceInMillions) {
-  // Convert balance to stock units
-  // 1 stock = 1 million coins
-  // Examples: 1.5m = 1 stock, 5m = 5 stock, 10.5m = 10 stock
   return Math.floor(balanceInMillions)
 }
 
@@ -172,7 +139,6 @@ function startBot() {
   bot.once('spawn', () => {
     console.log('🌍 Minecraft: Spawned and ready!')
     
-    // Execute /team home immediately
     setTimeout(() => {
       if (bot && bot.entity) {
         console.log('🏠 Executing /team home...')
@@ -180,12 +146,10 @@ function startBot() {
       }
     }, 2000)
 
-    // Check balance immediately after spawn
     setTimeout(() => {
       checkBalance()
     }, 5000)
 
-    // Execute /team home every 10 minutes
     teamHomeInterval = setInterval(() => {
       if (bot && bot.entity) {
         console.log('🏠 Executing /team home (scheduled)...')
@@ -193,7 +157,6 @@ function startBot() {
       }
     }, 1000 * 60 * 10)
 
-    // Update stock every X minutes (default: 5 minutes)
     if (SELLAUTH_API_KEY && SELLAUTH_SHOP_ID && SELLAUTH_PRODUCT_ID) {
       stockUpdateInterval = setInterval(() => {
         checkBalance()
@@ -201,19 +164,12 @@ function startBot() {
       console.log(`📊 Stock auto-update enabled (every ${STOCK_UPDATE_INTERVAL / 1000}s)`)
     }
 
-    // Process any pending payments
     processPendingPayments()
-
-    // Process pending raw coin payments (from SellAuth poller)
-    processPendingCoinPayments()
   })
 
-  // Listen for chat messages to parse balance
   bot.on('message', (message) => {
     const text = message.toString()
     
-    // Parse balance from common formats:
-    // "Your balance: $1,500,000" or "Balance: 1.5m" or "You have $2,000,000"
     const patterns = [
       /balance:?\s*\$?([\d,]+\.?\d*)\s*m/i,
       /balance:?\s*\$?([\d,]+)/i,
@@ -227,11 +183,9 @@ function startBot() {
       if (match) {
         let balance = match[1].replace(/,/g, '')
         
-        // If it ends with 'm', it's already in millions
         if (text.toLowerCase().includes('m')) {
           balance = parseFloat(balance)
         } else {
-          // Convert to millions
           balance = parseFloat(balance) / 1000000
         }
 
@@ -240,7 +194,6 @@ function startBot() {
           const stock = calculateStockFromBalance(balance)
           console.log(`💰 Balance detected: ${balance.toFixed(2)}m (${stock} stock units)`)
           
-          // Update SellAuth stock
           updateSellAuthStock(stock)
         }
         break
@@ -272,7 +225,6 @@ function startBot() {
     })
   }
 
-  // Keep-alive
   const keepAliveInterval = setInterval(() => {
     if (bot && bot.entity && bot.entity.position) {
       const pos = bot.entity.position
@@ -298,25 +250,14 @@ function scheduleReconnect() {
   }, delay)
 }
 
-// ============ BALANCE CHECKING ============
 function checkBalance() {
   if (!bot || !bot.entity) {
     console.warn('⚠️ Bot offline, cannot check balance')
     return
   }
 
-  // Try common balance commands
-  // Adjust these based on your server's economy plugin
-  const balanceCommands = [
-    '/balance',
-    '/bal',
-    '/money',
-    '/eco balance'
-  ]
-
-  // Try the first command (usually /balance or /bal)
   console.log('💳 Checking balance...')
-  bot.chat(balanceCommands[0])
+  bot.chat('/balance')
 }
 
 // ============ PAYMENT PROCESSING ============
@@ -324,60 +265,18 @@ function executePayment(username, amount) {
   if (!bot || !bot.entity) {
     console.warn(`⚠️ Bot offline, queuing payment: ${amount}m to ${username}`)
     pendingPayments.push({ username, amount })
-    console.log(`📌 Payment queued. Pending payments: ${pendingPayments.length}`)
-    return
+    return false
   }
 
   const command = `/pay ${username} ${amount}m`
   console.log(`💰 Executing: ${command}`)
   bot.chat(command)
 
-  // Check balance after payment to update stock
   setTimeout(() => {
     checkBalance()
   }, 3000)
-}
 
-// Execute payment in raw coins (integer amount, e.g. 1000000), used by SellAuth poller
-function executePaymentCoins(username, coins) {
-  return new Promise((resolve, reject) => {
-    if (!bot || !bot.entity) {
-      console.warn(`⚠️ Bot offline, cannot execute coin payment: ${coins} to ${username}`)
-      // Queue this payment to try later
-      pendingCoinPayments.push({ username, coins })
-      return reject(new Error('Bot offline'))
-    }
-
-    const command = `/pay ${username} ${coins}`
-    try {
-      console.log(`💸 Executing coin payment: ${command}`)
-      bot.chat(command)
-      // We optimistically assume the command was issued successfully.
-      // If you want to verify on-chat responses, add listeners and correlate.
-      setTimeout(() => {
-        // Trigger a balance check shortly after to refresh stock
-        checkBalance()
-      }, 3000)
-      resolve()
-    } catch (err) {
-      reject(err)
-    }
-  })
-}
-
-function processPendingCoinPayments() {
-  if (pendingCoinPayments.length === 0) return
-  console.log(`📋 Processing ${pendingCoinPayments.length} pending coin payment(s)...`)
-  while (pendingCoinPayments.length > 0) {
-    const p = pendingCoinPayments.shift()
-    executePaymentCoins(p.username, p.coins)
-      .then(() => console.log(`✅ Pending coin payment sent: ${p.username} +${p.coins}`))
-      .catch(err => {
-        console.error(`❌ Failed to send pending coin payment to ${p.username}:`, err.message || err)
-        // If it failed due to offline, push back onto queue for later
-        pendingCoinPayments.push(p)
-      })
-  }
+  return true
 }
 
 function processPendingPayments() {
@@ -395,11 +294,8 @@ function processPendingPayments() {
 // ============ WEBHOOK SERVER ============
 const app = express()
 
-app.use(express.json({
-  verify: (req, res, buf) => {
-    req.rawBody = buf ? buf.toString() : ''
-  }
-}))
+app.use(express.json())
+app.use(express.text()) // For dynamic delivery plain text responses
 
 app.get('/health', (req, res) => {
   res.json({
@@ -408,31 +304,103 @@ app.get('/health', (req, res) => {
     pendingPayments: pendingPayments.length,
     currentBalance: `${currentBalance.toFixed(2)}m`,
     currentStock: calculateStockFromBalance(currentBalance),
-    stockAutoUpdate: SELLAUTH_API_KEY ? 'enabled' : 'disabled',
-    recentWebhooks: recentWebhooks.slice(0,10).map(e => ({ timestamp: e.timestamp, event: e.event, id: e.id }))
+    stockAutoUpdate: SELLAUTH_API_KEY ? 'enabled' : 'disabled'
   })
 })
 
-app.post('/webhooks', async (req, res) => {
+// Dynamic Delivery Webhook (for products with "dynamic" deliverable type)
+app.post('/dynamic-delivery', (req, res) => {
   try {
-    console.log('🔔 Webhook received:', req.body?.event || '<no event>', `id: ${req.body?.data?.id || 'N/A'}`)
+    console.log('\n🎯 Dynamic delivery webhook received')
 
-    // Record for debugging
-    recentWebhooks.unshift({ timestamp: Date.now(), event: req.body?.event, id: req.body?.data?.id, raw: (req.rawBody || JSON.stringify(req.body)).slice(0,200) })
-    if (recentWebhooks.length > 20) recentWebhooks.pop()
-
-    // Verify webhook signature if secret is provided
-    if (WEBHOOK_SECRET) {
-      const signature = req.headers['x-hmac-signature'] || req.headers['x-sellauth-signature'] || req.headers['x-signature'] || req.headers['signature']
+    // Verify signature if secret is provided
+    if (DYNAMIC_DELIVERY_SECRET) {
+      const signature = req.headers['x-signature']
       if (!signature) {
-        console.warn('⚠️ Webhook received without signature header - rejected')
-        console.warn('   Available headers:', Object.keys(req.headers).join(', '))
+        console.warn('⚠️ No X-Signature header - rejected')
+        return res.status(403).send('Missing signature')
+      }
+
+      const payload = JSON.stringify(req.body)
+      const hash = crypto.createHmac('sha256', DYNAMIC_DELIVERY_SECRET).update(payload).digest('hex')
+
+      if (hash !== signature) {
+        console.warn('⚠️ Signature verification failed - rejected')
+        return res.status(403).send('Invalid signature')
+      }
+    }
+
+    const data = req.body
+
+    if (data.event === 'INVOICE.ITEM.DELIVER-DYNAMIC') {
+      console.log(`📦 Dynamic delivery request for invoice #${data.id}`)
+
+      // Get in-game name from custom fields
+      let inGameName = null
+      if (data.item && data.item.custom_fields) {
+        inGameName = data.item.custom_fields[CUSTOM_FIELD_NAME]
+      }
+
+      if (!inGameName) {
+        console.error(`❌ Missing custom field "${CUSTOM_FIELD_NAME}"`)
+        return res.status(400).send(`Error: Missing ${CUSTOM_FIELD_NAME} field`)
+      }
+
+      // Calculate amount
+      let amount = data.item.quantity || 1
+
+      // Try to extract amount from product/variant name
+      const productName = data.item.product?.name || ''
+      const variantName = data.item.variant?.name || ''
+      
+      const match = (productName + ' ' + variantName).match(/(\d+)m/i)
+      if (match) {
+        amount = parseInt(match[1]) * (data.item.quantity || 1)
+      }
+
+      console.log(`   - Player: ${inGameName}`)
+      console.log(`   - Amount: ${amount}m`)
+      console.log(`   - Product: ${productName}`)
+      console.log(`   - Quantity: ${data.item.quantity}`)
+
+      // Execute payment
+      const success = executePayment(inGameName, amount)
+
+      if (success) {
+        // Respond with delivery confirmation (plain text)
+        // This is what SellAuth will show to the customer
+        const deliveryMessage = `Payment of ${amount}m has been sent to ${inGameName}!\nPlease check your in-game balance.`
+        return res.status(200).send(deliveryMessage)
+      } else {
+        // Bot offline - queue the payment
+        return res.status(200).send(`Payment queued for ${inGameName}. You will receive ${amount}m once the system is back online.`)
+      }
+    } else {
+      console.log(`ℹ️ Unknown event: ${data.event}`)
+      return res.status(200).send('Event received')
+    }
+
+  } catch (err) {
+    console.error('❌ Dynamic delivery error:', err.message)
+    return res.status(500).send('Internal server error')
+  }
+})
+
+// Regular Order Webhook (optional - for order:completed events)
+app.post('/webhook', (req, res) => {
+  try {
+    if (WEBHOOK_SECRET) {
+      const signature = req.headers['signature']
+      if (!signature) {
+        console.warn('⚠️ Webhook without signature - rejected')
         return res.status(403).json({ error: 'No signature provided' })
       }
 
-      const raw = req.rawBody || JSON.stringify(req.body)
-      if (!verifyHmac(raw, signature, WEBHOOK_SECRET)) {
-        console.warn('⚠️ Webhook signature verification failed - rejected')
+      const payload = JSON.stringify(req.body)
+      const hash = crypto.createHmac('sha256', WEBHOOK_SECRET).update(payload).digest('hex')
+
+      if (hash !== signature) {
+        console.warn('⚠️ Webhook signature verification failed')
         return res.status(403).json({ error: 'Invalid signature' })
       }
     }
@@ -440,7 +408,7 @@ app.post('/webhooks', async (req, res) => {
     const { event, data } = req.body
 
     if (event === 'order:completed' || event === 'order.completed') {
-      console.log(`\n🎉 New order received! Invoice #${data.id}`)
+      console.log(`\n🎉 Order completed webhook - Invoice #${data.id}`)
       
       let inGameName = null
       if (data.custom_fields && Array.isArray(data.custom_fields)) {
@@ -453,123 +421,45 @@ app.post('/webhooks', async (req, res) => {
       }
 
       if (!inGameName) {
-        console.error(`❌ Order ${data.id}: Missing custom field "${CUSTOM_FIELD_NAME}"`)
-        return res.json({ 
-          success: false, 
-          error: `Please provide your in-game name in the "${CUSTOM_FIELD_NAME}" field` 
-        })
+        console.error(`❌ Missing custom field "${CUSTOM_FIELD_NAME}"`)
+        return res.json({ success: false, error: 'Missing in-game name' })
       }
 
       let amount = 1
-
-      const nameToParse = (data.variant_name || data.product_name || '').toString()
-      // Match patterns like '1m', '1 M', '1 million', '1.5m'
-      const match = nameToParse.match(/(\d+(?:\.\d+)?)(?:\s*(m|million))\b/i)
-      if (match) {
-        amount = parseFloat(match[1])
-      } else {
-        // Fallback: try shorthand like '1M' or '5m'
-        const match2 = nameToParse.match(/(\d+(?:\.\d+)?)[\s-]*m\b/i)
-        if (match2) amount = parseFloat(match2[1])
+      
+      if (data.variant_name) {
+        const match = data.variant_name.match(/(\d+)m/i)
+        if (match) {
+          amount = parseInt(match[1])
+        }
+      } else if (data.product_name) {
+        const match = data.product_name.match(/(\d+)m/i)
+        if (match) {
+          amount = parseInt(match[1])
+        }
       }
 
       if (data.quantity && data.quantity > 1) {
         amount *= data.quantity
       }
 
-      console.log(`📦 Order details:`)
       console.log(`   - Player: ${inGameName}`)
       console.log(`   - Amount: ${amount}m`)
-      console.log(`   - Product: ${data.product_name || 'N/A'}`)
-      console.log(`   - Email: ${data.email || 'N/A'}`)
 
       executePayment(inGameName, amount)
 
-      // Auto-process the invoice in SellAuth
-      if (SELLAUTH_API_KEY && SELLAUTH_SHOP_ID && data.id) {
-        const invoiceId = data.id
-        const processUrl = `https://api.sellauth.com/v1/shops/${SELLAUTH_SHOP_ID}/invoices/${invoiceId}/process`
-        
-        fetch(processUrl, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${SELLAUTH_API_KEY}`
-          }
-        })
-        .then(res => res.json())
-        .then(result => {
-          console.log(`✅ SellAuth invoice ${invoiceId} marked as processed`)
-        })
-        .catch(err => {
-          console.error(`❌ Failed to process invoice in SellAuth:`, err.message)
-        })
-      }
-
-      res.json({ 
-        success: true, 
-        message: `Payment of ${amount}m will be sent to ${inGameName}` 
-      })
-      return
+      res.json({ success: true, message: `Payment sent to ${inGameName}` })
+    } else {
+      console.log(`ℹ️ Webhook event: ${event} (ignored)`)
+      res.json({ success: true, message: 'Event ignored' })
     }
-
-    // Dynamic Delivery webhook
-    if (event === 'INVOICE.ITEM.DELIVER-DYNAMIC') {
-      console.log(`\n🚀 Dynamic Delivery requested for item #${req.body.item?.id}`)
-      
-      let inGameName = null
-      if (req.body.item?.custom_fields) {
-        // Try to find the in-game name in custom_fields (object format)
-        if (typeof req.body.item.custom_fields === 'object' && !Array.isArray(req.body.item.custom_fields)) {
-          inGameName = req.body.item.custom_fields[CUSTOM_FIELD_NAME]
-        } else if (Array.isArray(req.body.item.custom_fields)) {
-          const nameField = req.body.item.custom_fields.find(f => f.name === CUSTOM_FIELD_NAME)
-          if (nameField) inGameName = nameField.value
-        }
-      }
-
-      if (!inGameName) {
-        console.error(`❌ Dynamic delivery for item ${req.body.item?.id}: Missing in-game name`)
-        res.statusCode = 200
-        res.setHeader('Content-Type', 'text/plain')
-        return res.end('ERROR: Missing in-game name')
-      }
-
-      // Parse amount from product/variant name or use quantity
-      let amount = req.body.item?.quantity || 1
-      const variantName = req.body.item?.variant?.name || ''
-      const productName = req.body.item?.product?.name || ''
-      const fullName = (variantName || productName).toString()
-      
-      const match = fullName.match(/(\d+(?:\.\d+)?)(?:\s*(m|million))\b/i)
-      if (match) {
-        amount = parseFloat(match[1])
-      }
-
-      console.log(`📦 Dynamic Delivery details:`)
-      console.log(`   - Player: ${inGameName}`)
-      console.log(`   - Amount: ${amount}m`)
-      console.log(`   - Product: ${productName}`)
-      console.log(`   - Email: ${req.body.email || 'N/A'}`)
-
-      executePayment(inGameName, amount)
-
-      // Return 200 OK with confirmation (plain text for SellAuth)
-      res.statusCode = 200
-      res.setHeader('Content-Type', 'text/plain')
-      return res.end(`SUCCESS: Delivered ${amount}m to ${inGameName}`)
-    }
-
-    console.log(`ℹ️ Received webhook event: ${event} (ignored)`)
-    res.json({ success: true, message: 'Event ignored' })
 
   } catch (err) {
     console.error('❌ Webhook error:', err.message)
-    console.error('Stack:', err.stack)
-    res.status(500).json({ error: 'Internal server error', message: err.message })
+    res.status(500).json({ error: 'Internal server error' })
   }
 })
 
-// Manual stock update endpoint
 app.post('/update-stock', async (req, res) => {
   try {
     checkBalance()
@@ -587,11 +477,12 @@ app.post('/update-stock', async (req, res) => {
   }
 })
 
-// Global error handler for Express
-app.use((err, req, res, next) => {
-  console.error('❌ Express error:', err.message)
-  console.error(err.stack)
-  res.status(500).json({ error: 'Internal server error', message: err.message })
+app.listen(WEBHOOK_PORT, () => {
+  console.log(`\n🚀 Webhook server started`)
+  console.log(`📍 Listening on: http://localhost:${WEBHOOK_PORT}`)
+  console.log(`🔗 Dynamic Delivery URL: http://your-domain.com:${WEBHOOK_PORT}/dynamic-delivery`)
+  console.log(`🔗 Order Webhook URL: http://your-domain.com:${WEBHOOK_PORT}/webhook`)
+  console.log(`💡 Set Dynamic Delivery URL in: SellAuth > Products > Edit > Dynamic Delivery URL\n`)
 })
 
 // ============ PROCESS HANDLERS ============
@@ -600,7 +491,6 @@ process.on('SIGINT', () => {
   clearIntervals()
   if (reconnectTimeout) clearTimeout(reconnectTimeout)
   if (bot) bot.quit()
-  try { stopSellAuthPoller() } catch(e) {}
   process.exit(0)
 })
 
@@ -609,7 +499,6 @@ process.on('SIGTERM', () => {
   clearIntervals()
   if (reconnectTimeout) clearTimeout(reconnectTimeout)
   if (bot) bot.quit()
-  try { stopSellAuthPoller() } catch(e) {}
   process.exit(0)
 })
 
@@ -625,27 +514,9 @@ process.on('unhandledRejection', (err) => {
   console.log('🔄 Attempting to recover...')
 })
 
-process.on('uncaughtException', (err) => {
-  console.error('❌ Uncaught exception:', err.message)
-  console.error(err.stack)
-})
-
 // ============ START ============
 console.log('🎮 Starting SellAuth + Minecraft Integration...')
 console.log(`📍 Minecraft: ${MC_HOST}:${MC_PORT}`)
 console.log(`👤 Username: ${MC_USERNAME}`)
 console.log(`🔐 Auth: ${MC_AUTH}`)
-
-// Start webhook server first
-const server = app.listen(WEBHOOK_PORT, '0.0.0.0', () => {
-  console.log(`\n🚀 Webhook server started`)
-  console.log(`📍 Listening on: 0.0.0.0:${WEBHOOK_PORT}`)
-  console.log(`🔗 Webhook URL: https://escrow-middleman-production.up.railway.app/webhooks`)
-  console.log(`💡 Set this URL in SellAuth Dashboard > Settings > Developers\n`)
-  
-  // Start bot connection asynchronously (doesn't block the server)
-  setImmediate(() => startBot())
-
-  // Start SellAuth poller to auto-pay completed invoices
-  setImmediate(() => startSellAuthPoller({ doPayment: executePaymentCoins }))
-})
+startBot()
