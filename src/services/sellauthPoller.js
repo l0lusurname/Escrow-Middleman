@@ -98,21 +98,21 @@ export function startSellAuthPoller(options = {}) {
 
   async function pollOnce() {
     try {
-      // FIXED: Send statuses as array in request body instead of query param
-      const url = `https://api.sellauth.com/v1/shops/${SELLAUTH_SHOP_ID}/invoices`
+      // FIXED: Use GET with array parameter using bracket notation
+      const params = new URLSearchParams()
+      params.append('statuses[]', 'completed')
+      params.append('perPage', '100')
+      params.append('orderColumn', 'completed_at')
+      params.append('orderDirection', 'desc')
+      
+      const url = `https://api.sellauth.com/v1/shops/${SELLAUTH_SHOP_ID}/invoices?${params.toString()}`
+      
       const res = await fetch(url, {
-        method: 'POST',
+        method: 'GET',
         headers: {
           'Authorization': `Bearer ${SELLAUTH_API_KEY}`,
-          'Content-Type': 'application/json',
           'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          statuses: ["completed"],  // Must be an array
-          perPage: 100,
-          orderColumn: "completed_at",
-          orderDirection: "desc"
-        })
+        }
       })
 
       if (!res.ok) {
